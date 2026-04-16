@@ -71,7 +71,14 @@ export class HatchClient {
   /**
    * Launch a new token: creates the Token-2022 mint with metadata, initializes
    * the LauncherPda (first launch only), and opens the pre-bonding DLMM position
-   * with 70% of supply locked. Atomic single transaction.
+   * with 70% of supply locked.
+   *
+   * Sent as up to two sequential transactions:
+   *   1. Setup tx (only if needed) — initializes LauncherPda and/or the WSOL ATA
+   *   2. Launch tx — creates the token mint and the pool/locked position
+   *
+   * The split keeps each tx under Solana's 1232-byte limit. On subsequent
+   * launches from the same wallet, setup is skipped and only the launch tx is sent.
    *
    * Caller must host the metadata JSON at `params.uri` before calling.
    * Signer wallet needs ~0.25 SOL for rent + fees.
@@ -88,24 +95,57 @@ export class HatchClient {
     const presetParameter = BONDING_CURVE_FEE_PRESETS[feeRate];
 
     const launcherExists = await launcherPdaExists(connection, authority);
+    const launcherWsolAta = getAssociatedTokenAddressSync(
+      WSOL_MINT,
+      launcherPda,
+      true,
+      TOKEN_PROGRAM_ID,
+    );
+    const launcherWsolAtaInfo = await connection.getAccountInfo(launcherWsolAta);
+    const needsSetup = !launcherExists || launcherWsolAtaInfo === null;
 
-    const instructions: TransactionInstruction[] = [];
-    instructions.push(
+    const lookupTables = await fetchLookupTables(connection, GLOBAL_ALTS);
+
+    // --- Setup tx (LauncherPda init + WSOL ATA) ---
+    let setupTransaction: VersionedTransaction | undefined;
+    if (needsSetup) {
+      const setupIxs: TransactionInstruction[] = [];
+      if (!launcherExists) {
+        let referrerLauncherPda: PublicKey | undefined;
+        if (params.referrer) {
+          const [refPda] = deriveLauncherPda(params.referrer);
+          referrerLauncherPda = refPda;
+        }
+        setupIxs.push(buildInitializeLauncherPdaIx(authority, referrerLauncherPda));
+      }
+      if (launcherWsolAtaInfo === null) {
+        setupIxs.push(
+          createAssociatedTokenAccountInstruction(
+            authority,
+            launcherWsolAta,
+            launcherPda,
+            WSOL_MINT,
+            TOKEN_PROGRAM_ID,
+          ),
+        );
+      }
+      const { blockhash: setupBh } = await connection.getLatestBlockhash("confirmed");
+      const setupMsg = new TransactionMessage({
+        payerKey: authority,
+        recentBlockhash: setupBh,
+        instructions: setupIxs,
+      }).compileToV0Message(lookupTables);
+      setupTransaction = new VersionedTransaction(setupMsg);
+    }
+
+    // --- Launch tx (mint + pool + locked position) ---
+    const launchIxs: TransactionInstruction[] = [];
+    launchIxs.push(
       ComputeBudgetProgram.setComputeUnitLimit({
         units: this.config.launchComputeUnitLimit,
       }),
     );
-
-    if (!launcherExists) {
-      let referrerLauncherPda: PublicKey | undefined;
-      if (params.referrer) {
-        const [refPda] = deriveLauncherPda(params.referrer);
-        referrerLauncherPda = refPda;
-      }
-      instructions.push(buildInitializeLauncherPdaIx(authority, referrerLauncherPda));
-    }
-
-    instructions.push(
+    launchIxs.push(
       buildCreateTokenAndLaunchAccountIx(
         authority,
         tokenMintKeypair.publicKey,
@@ -114,26 +154,6 @@ export class HatchClient {
         params.uri,
       ),
     );
-
-    const launcherWsolAta = getAssociatedTokenAddressSync(
-      WSOL_MINT,
-      launcherPda,
-      true,
-      TOKEN_PROGRAM_ID,
-    );
-    const launcherWsolAtaInfo = await connection.getAccountInfo(launcherWsolAta);
-    if (launcherWsolAtaInfo === null) {
-      instructions.push(
-        createAssociatedTokenAccountInstruction(
-          authority,
-          launcherWsolAta,
-          launcherPda,
-          WSOL_MINT,
-          TOKEN_PROGRAM_ID,
-        ),
-      );
-    }
-
     const poolResult = buildCreatePoolAndLockedPositionIx({
       authority,
       tokenMintX: tokenMintKeypair.publicKey,
@@ -143,18 +163,15 @@ export class HatchClient {
       position: positionKeypair.publicKey,
       presetParameter,
     });
-    instructions.push(poolResult.instruction);
+    launchIxs.push(poolResult.instruction);
 
-    const lookupTables = await fetchLookupTables(connection, GLOBAL_ALTS);
-    const { blockhash } = await connection.getLatestBlockhash("confirmed");
-
-    const messageV0 = new TransactionMessage({
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+    const launchMsg = new TransactionMessage({
       payerKey: authority,
       recentBlockhash: blockhash,
-      instructions,
+      instructions: launchIxs,
     }).compileToV0Message(lookupTables);
-
-    const transaction = new VersionedTransaction(messageV0);
+    const transaction = new VersionedTransaction(launchMsg);
 
     if (params.dryRun) {
       return {
@@ -164,7 +181,24 @@ export class HatchClient {
         lbPair: poolResult.lbPair,
         position: positionKeypair.publicKey,
         transaction,
+        setupTransaction,
       };
+    }
+
+    // Send setup first (if needed) and wait for confirmation before launch.
+    let setupSignature: string | undefined;
+    if (setupTransaction) {
+      setupTransaction.sign([signer]);
+      setupSignature = await connection.sendTransaction(setupTransaction, {
+        skipPreflight: false,
+        maxRetries: 3,
+      });
+      const { blockhash: sbh, lastValidBlockHeight: slv } =
+        await connection.getLatestBlockhash("confirmed");
+      await connection.confirmTransaction(
+        { signature: setupSignature, blockhash: sbh, lastValidBlockHeight: slv },
+        "confirmed",
+      );
     }
 
     transaction.sign([signer, tokenMintKeypair, positionKeypair]);
@@ -173,12 +207,13 @@ export class HatchClient {
       maxRetries: 3,
     });
     await connection.confirmTransaction(
-      { signature, blockhash, lastValidBlockHeight: (await connection.getLatestBlockhash()).lastValidBlockHeight },
+      { signature, blockhash, lastValidBlockHeight },
       "confirmed",
     );
 
     return {
       signature,
+      setupSignature,
       mint: tokenMintKeypair.publicKey,
       launcherPda,
       lbPair: poolResult.lbPair,

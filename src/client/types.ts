@@ -44,8 +44,11 @@ export interface LaunchParams {
 }
 
 export interface LaunchResult {
-  /** Transaction signature (empty string if dryRun). */
+  /** The main launch transaction signature (empty string if dryRun). */
   signature: string;
+  /** Optional setup-tx signature, if LauncherPda and/or WSOL ATA had to be created first.
+   *  The setup step is sent before the launch tx when needed, to keep each tx under the 1232-byte limit. */
+  setupSignature?: string;
   /** The newly-created SPL token mint pubkey. */
   mint: PublicKey;
   /** The LauncherPda that owns the position (derived from signer). */
@@ -54,8 +57,10 @@ export interface LaunchResult {
   lbPair: PublicKey;
   /** The locked Meteora position pubkey. */
   position: PublicKey;
-  /** The unsigned VersionedTransaction (populated when dryRun is true). */
+  /** The unsigned launch transaction (populated when dryRun is true). */
   transaction?: VersionedTransaction;
+  /** The unsigned setup transaction (populated when dryRun is true and setup is needed). */
+  setupTransaction?: VersionedTransaction;
 }
 
 export interface ClaimFeesParams {

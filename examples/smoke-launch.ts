@@ -67,11 +67,14 @@ async function main() {
 
   console.log("\n[1/3] Launching token...");
   const launch = await hatch.launch({
-    name: "Hatch SDK Smoke",
-    symbol: "HSDK",
+    name: "Openclaw Launched This",
+    symbol: "CLAW",
     uri: METADATA_URI!,
   });
-  console.log(`  tx:       https://solscan.io/tx/${launch.signature}`);
+  if (launch.setupSignature) {
+    console.log(`  setup tx: https://solscan.io/tx/${launch.setupSignature}`);
+  }
+  console.log(`  launch:   https://solscan.io/tx/${launch.signature}`);
   console.log(`  mint:     ${launch.mint.toBase58()}`);
   console.log(`  lbPair:   ${launch.lbPair.toBase58()}`);
   console.log(`  position: ${launch.position.toBase58()}`);
