@@ -8,4 +8,5 @@ dist/
 !*.env.example
 *.tsbuildinfo
 .smoke-keypair.json
+.buyer-keypair.json
 examples/.env

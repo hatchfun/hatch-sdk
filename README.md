@@ -25,8 +25,12 @@ const signer = Keypair.fromSecretKey(/* your secret key bytes */);
 
 const hatch = new HatchClient({ connection, signer });
 
-// 1. Launch a token (atomic: mint + pool + locked position with 70% of supply)
-const { signature, mint, lbPair, position } = await hatch.launch({
+// 1. Launch a token (mint + pool + locked position with 70% of supply)
+//    On a fresh wallet the SDK sends two sequential txs:
+//      - setup: InitializeLauncherPda + create WSOL ATA
+//      - launch: create token + pool + locked position
+//    On subsequent launches from the same wallet, only the launch tx runs.
+const { signature, setupSignature, mint, lbPair, position } = await hatch.launch({
   name: "My Token",
   symbol: "MYTOK",
   uri: "https://example.com/metadata.json",
@@ -57,6 +61,12 @@ The `uri` you pass to `launch()` must resolve to a JSON file in the standard tok
 ```
 
 Host it anywhere reachable over HTTPS — S3, IPFS/Pinata, Arweave, a public GitHub Gist, your own server. The SDK does not upload metadata for you.
+
+> **⚠️ The URI is permanent on-chain.** Do not use URLs that may disappear or require auth:
+> - **Private GitHub repo `raw.githubusercontent.com` links** return 404 — broken image forever.
+> - **Signed URLs** / presigned S3 links expire.
+> - **Hot-swappable gist URLs** (without a revision hash) can break if the gist is later deleted or the default branch structure changes. Use the pinned `/raw/<commit-sha>/filename` form.
+> - **Host the image on a real CDN** (jsDelivr, your own S3/CloudFront, IPFS pinning service). Avoid private or ephemeral hosts.
 
 ## Launch with a referrer
 
@@ -122,6 +132,20 @@ When you call `claimFees()`:
 - 20% of accrued WSOL → Hatch treasury (or 16%/4% treasury/referrer if you have one).
 - Remainder → your signer's WSOL ATA.
 
+## Runnable example
+
+`examples/smoke-launch.ts` does a full launch + status read + claim cycle end-to-end on mainnet. To run:
+
+```bash
+cp examples/.env.example examples/.env
+# edit examples/.env with your RPC_URL and METADATA_URI
+solana-keygen new --no-bip39-passphrase --outfile .smoke-keypair.json
+# fund the generated pubkey with ~0.3 SOL on mainnet
+pnpm tsx examples/smoke-launch.ts
+```
+
+The script prints Solscan links for the setup tx, launch tx, and claim tx.
+
 ## Advanced: instruction builders
 
 The high-level client is a thin wrapper over exported primitives. Compose your own transactions:
@@ -151,10 +175,12 @@ Subpath imports are also supported: `hatch-sdk/launch`, `hatch-sdk/fees`, `hatch
 
 ## Troubleshooting
 
+- **`VersionedTransaction too large: 1261 bytes (max: encoded/raw 1644/1232)`** — You're on a version before the split-tx fix. Upgrade to the latest `main`. From a fresh wallet, the SDK now splits setup (LauncherPda + WSOL ATA) and launch (token + pool) into two sequential transactions to stay under the 1232-byte limit.
 - **`No claimable positions found for mint ...`** — The signer's LauncherPda doesn't own a position for that mint. Check `getLaunchStatus({ mint })`.
 - **`Insufficient funds`** or simulation errors on `launch()` — signer wallet needs ~0.25 SOL.
 - **Transaction simulation fails with compute budget error** — bump `launchComputeUnitLimit` / `claimComputeUnitLimit` in `HatchClient` config.
 - **RPC timeouts** — use a paid RPC (Helius, QuickNode, Triton) instead of public RPC for production.
+- **Launched token shows a broken image in Phantom/Solscan** — your metadata `image` URL is unreachable. Common causes: hosted on a private GitHub repo, presigned S3 URL that expired, or an unpinned gist URL. The on-chain URI is immutable; you'll need to relaunch.
 
 ## Security note
 
