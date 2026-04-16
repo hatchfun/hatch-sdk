@@ -1,0 +1,8 @@
+export function buildMeteoraRemainingAccountsInfo(): Buffer {
+  return Buffer.from([
+    0x02, 0x00, 0x00,
+    0x00, 0x00,
+    0x00, 0x01,
+    0x00,
+  ]);
+}
