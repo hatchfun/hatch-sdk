@@ -20,6 +20,7 @@ import {
   buildClaimFeeManualIx,
   buildClaimReferrerFeesIx,
   buildInitPoolFeeAccountIx,
+  buildInitReferrerFeeAccountIx,
 } from "../fees";
 import {
   buildCreatePoolAndLockedPositionIx,
@@ -40,6 +41,8 @@ import type {
   ClaimReferrerFeesParams,
   ClaimReferrerFeesResult,
   HatchClientConfig,
+  InitReferrerFeeAccountParams,
+  InitReferrerFeeAccountResult,
   LaunchParams,
   LaunchResult,
   LaunchStatus,
@@ -52,7 +55,8 @@ const DEFAULT_CLAIM_CU_LIMIT = 1_400_000;
  * High-level client for Hatch token launches and fee claims.
  *
  * Designed for agents and scripts: instantiate once with a Connection + Keypair,
- * then call `launch()`, `claimFees()`, `claimReferrerFees()`, or `getLaunchStatus()`.
+ * then call `launch()`, `claimFees()`, `initReferrerFeeAccount()`,
+ * `claimReferrerFees()`, or `getLaunchStatus()`.
  *
  * For advanced composition (custom tx bundling, multi-signer flows), import the
  * individual `build*Ix` functions instead.
@@ -108,6 +112,8 @@ export class HatchClient {
 
     // --- Setup tx (LauncherPda init + WSOL ATA) ---
     let setupTransaction: VersionedTransaction | undefined;
+    let setupBlockhash: string | undefined;
+    let setupLastValidBlockHeight: number | undefined;
     if (needsSetup) {
       const setupIxs: TransactionInstruction[] = [];
       if (!launcherExists) {
@@ -129,7 +135,10 @@ export class HatchClient {
           ),
         );
       }
-      const { blockhash: setupBh } = await connection.getLatestBlockhash("confirmed");
+      const { blockhash: setupBh, lastValidBlockHeight: setupLvb } =
+        await connection.getLatestBlockhash("confirmed");
+      setupBlockhash = setupBh;
+      setupLastValidBlockHeight = setupLvb;
       const setupMsg = new TransactionMessage({
         payerKey: authority,
         recentBlockhash: setupBh,
@@ -174,6 +183,7 @@ export class HatchClient {
     const transaction = new VersionedTransaction(launchMsg);
 
     if (params.dryRun) {
+      transaction.sign([tokenMintKeypair, positionKeypair]);
       return {
         signature: "",
         mint: tokenMintKeypair.publicKey,
@@ -193,10 +203,12 @@ export class HatchClient {
         skipPreflight: false,
         maxRetries: 3,
       });
-      const { blockhash: sbh, lastValidBlockHeight: slv } =
-        await connection.getLatestBlockhash("confirmed");
       await connection.confirmTransaction(
-        { signature: setupSignature, blockhash: sbh, lastValidBlockHeight: slv },
+        {
+          signature: setupSignature,
+          blockhash: setupBlockhash!,
+          lastValidBlockHeight: setupLastValidBlockHeight!,
+        },
         "confirmed",
       );
     }
@@ -280,6 +292,7 @@ export class HatchClient {
       : undefined;
 
     const signatures: string[] = [];
+    const transactions: VersionedTransaction[] = [];
     for (const target of claimTargets) {
       const instructions: TransactionInstruction[] = [];
       instructions.push(
@@ -359,6 +372,7 @@ export class HatchClient {
       const transaction = new VersionedTransaction(messageV0);
 
       if (params.dryRun) {
+        transactions.push(transaction);
         continue;
       }
 
@@ -374,7 +388,60 @@ export class HatchClient {
       signatures.push(signature);
     }
 
-    return { signatures, positionsClaimed: signatures.length };
+    return {
+      signatures,
+      positionsClaimed: claimTargets.length,
+      transactions: params.dryRun ? transactions : undefined,
+    };
+  }
+
+  /**
+   * Initialize the caller's referrer fee account PDA.
+   *
+   * Referrers should do this once before referred launches start claiming fees,
+   * otherwise the on-chain program falls back to sending the 4% referrer cut to
+   * treasury when no referrer fee account exists.
+   */
+  async initReferrerFeeAccount(
+    params: InitReferrerFeeAccountParams = {},
+  ): Promise<InitReferrerFeeAccountResult> {
+    const { connection, signer } = this.config;
+    const authority = signer.publicKey;
+    const [launcherPda] = deriveLauncherPda(authority);
+    const [referrerFeeAccount] = deriveReferrerFeeAccount(launcherPda);
+
+    const referrerFeeAccountInfo = await connection.getAccountInfo(referrerFeeAccount);
+    if (referrerFeeAccountInfo !== null) {
+      return { signature: "" };
+    }
+
+    const transaction = new VersionedTransaction(
+      new TransactionMessage({
+        payerKey: authority,
+        recentBlockhash: (await connection.getLatestBlockhash("confirmed")).blockhash,
+        instructions: [buildInitReferrerFeeAccountIx({ authority })],
+      }).compileToV0Message(),
+    );
+
+    if (params.dryRun) {
+      return { signature: "", transaction };
+    }
+
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+    const liveTransaction = new VersionedTransaction(
+      new TransactionMessage({
+        payerKey: authority,
+        recentBlockhash: blockhash,
+        instructions: [buildInitReferrerFeeAccountIx({ authority })],
+      }).compileToV0Message(),
+    );
+    liveTransaction.sign([signer]);
+    const signature = await connection.sendTransaction(liveTransaction, {
+      skipPreflight: false,
+      maxRetries: 3,
+    });
+    await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, "confirmed");
+    return { signature };
   }
 
   /**
@@ -384,8 +451,15 @@ export class HatchClient {
   async claimReferrerFees(params: ClaimReferrerFeesParams = {}): Promise<ClaimReferrerFeesResult> {
     const { connection, signer } = this.config;
     const authority = signer.publicKey;
+    const [launcherPda] = deriveLauncherPda(authority);
+    const [referrerFeeAccount] = deriveReferrerFeeAccount(launcherPda);
 
     const instructions: TransactionInstruction[] = [];
+
+    const referrerFeeAccountInfo = await connection.getAccountInfo(referrerFeeAccount);
+    if (referrerFeeAccountInfo === null) {
+      instructions.push(buildInitReferrerFeeAccountIx({ authority }));
+    }
 
     const authorityWsolAta = getAssociatedTokenAddressSync(
       WSOL_MINT,
@@ -414,7 +488,7 @@ export class HatchClient {
     const transaction = new VersionedTransaction(messageV0);
 
     if (params.dryRun) {
-      return { signature: "" };
+      return { signature: "", transaction };
     }
 
     transaction.sign([signer]);

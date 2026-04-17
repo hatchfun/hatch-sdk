@@ -11,6 +11,8 @@ export type {
   LaunchResult,
   ClaimFeesParams,
   ClaimFeesResult,
+  InitReferrerFeeAccountParams,
+  InitReferrerFeeAccountResult,
   ClaimReferrerFeesParams,
   ClaimReferrerFeesResult,
   LaunchStatus,

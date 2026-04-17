@@ -2,7 +2,7 @@
 
 TypeScript SDK for launching tokens and claiming fees on [Hatch](https://hatch.fm) — a Solana token launcher built on Meteora DLMM.
 
-Designed to be agent-friendly: one client, four methods.
+Designed to be agent-friendly: one client, five methods.
 
 ---
 
@@ -10,11 +10,14 @@ Designed to be agent-friendly: one client, four methods.
 
 - [Prerequisites](#prerequisites)
 - [Install](#install)
+- [Versioning](#versioning)
+- [Public Usage Policy](#public-usage-policy)
 - [Setup](#setup)
 - [API reference](#api-reference)
   - [`new HatchClient(config)`](#new-hatchclientconfig)
   - [`hatch.launch(params)`](#hatchlaunchparams)
   - [`hatch.claimFees(params)`](#hatchclaimfeesparams)
+  - [`hatch.initReferrerFeeAccount(params?)`](#hatchinitreferrerfeeaccountparams)
   - [`hatch.claimReferrerFees(params?)`](#hatchclaimreferrerfeesparams)
   - [`hatch.getLaunchStatus(params)`](#hatchgetlaunchstatusparams)
 - [Step-by-step: your first launch](#step-by-step-your-first-launch)
@@ -27,6 +30,7 @@ Designed to be agent-friendly: one client, four methods.
 - [Advanced: instruction builders](#advanced-instruction-builders)
 - [How it works under the hood](#how-it-works-under-the-hood)
 - [Troubleshooting](#troubleshooting)
+- [Agent Safety](#agent-safety)
 - [Security](#security)
 - [License](#license)
 
@@ -44,13 +48,45 @@ Designed to be agent-friendly: one client, four methods.
 ## Install
 
 ```bash
-# from GitHub (recommended — the SDK is not on npm yet)
-pnpm add github:hatchfun/hatch-sdk
+# from GitHub (recommended — pin to a tag or commit, not a moving branch)
+pnpm add github:hatchfun/hatch-sdk#v0.1.0
 # or
-npm install github:hatchfun/hatch-sdk
+npm install github:hatchfun/hatch-sdk#v0.1.0
 ```
 
 > **Note:** The SDK ships TypeScript source (no compiled JS). Your project must handle `.ts` imports — use `tsx`, `ts-node`, or a bundler that supports TypeScript.
+> **Recommendation:** For agents and production automation, pin to a Git tag or commit SHA. Avoid installing from a moving branch like `main`.
+
+## Versioning
+
+This SDK is not on npm yet. If you plan to share it publicly for agents, prefer one of these release models:
+
+- Best: publish tagged GitHub releases and have users install by tag or commit SHA.
+- Better than nothing: tell users to pin a specific commit SHA.
+- Avoid: telling users to clone or install straight from a moving `main` branch.
+
+Why:
+
+- agents are more reliable when everyone uses the same exact SDK build
+- rollback is simpler if a bad change lands
+- audit findings and support requests are easier to map to a concrete version
+- supply-chain risk is lower when consumers pin immutable refs
+
+If you do not want npm overhead yet, GitHub tags are enough. You do not need a registry publish to get the safety benefits of versioning.
+
+## Public Usage Policy
+
+If you are consuming this SDK from outside Hatch, use these rules:
+
+- Supported install target: a tagged release or pinned commit SHA.
+- Not a supported install target: a moving branch such as `main`.
+- Current recommended install target: `github:hatchfun/hatch-sdk#v0.1.0`
+- Recommended interface for agents: the high-level `HatchClient`.
+- Advanced interface: the low-level instruction builders are available, but they are easier to misuse and should be treated as expert-only.
+- Signing policy: simulate and review before requesting a live signature.
+- Wallet policy: use a dedicated launcher hot wallet with limited SOL balance.
+
+In short: pin versions, prefer the high-level client, and do not treat `main` as a stable release channel.
 
 ## Setup
 
@@ -123,8 +159,8 @@ Launch a new token with a locked Meteora DLMM position.
 | `launcherPda` | `PublicKey` | The LauncherPda account that owns the locked position. Derived from signer. |
 | `lbPair` | `PublicKey` | The Meteora DLMM pool address. |
 | `position` | `PublicKey` | The locked Meteora position address. |
-| `transaction` | `VersionedTransaction \| undefined` | Unsigned launch transaction (only when `dryRun: true`). |
-| `setupTransaction` | `VersionedTransaction \| undefined` | Unsigned setup transaction (only when `dryRun: true` and setup is needed). |
+| `transaction` | `VersionedTransaction \| undefined` | Launch transaction, already signed by any SDK-generated ephemeral signers when `dryRun: true`. You still sign with your wallet before sending. |
+| `setupTransaction` | `VersionedTransaction \| undefined` | Setup transaction (only when `dryRun: true` and setup is needed). |
 
 #### Example
 
@@ -158,7 +194,8 @@ Claim accrued WSOL fees from a launched token's position(s). The SDK automatical
 | Field | Type | Description |
 |---|---|---|
 | `signatures` | `string[]` | Transaction signatures, one per claimed position. |
-| `positionsClaimed` | `number` | Number of positions that were claimed. |
+| `positionsClaimed` | `number` | Number of positions targeted in this call. |
+| `transactions` | `VersionedTransaction[] \| undefined` | Built claim transactions when `dryRun: true`, one per targeted position. |
 
 #### Example
 
@@ -172,6 +209,34 @@ const result = await hatch.claimFees({
 console.log(`Claimed ${result.positionsClaimed} position(s)`);
 for (const sig of result.signatures) {
   console.log(`  https://solscan.io/tx/${sig}`);
+}
+```
+
+---
+
+### `hatch.initReferrerFeeAccount(params?)`
+
+Initialize the signer's referrer fee account PDA. A referrer should do this once before referred users start claiming fees, otherwise Hatch falls back to sending the 4% referrer cut to treasury.
+
+#### Parameters
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `dryRun` | `boolean` | no | `false` | If `true`, builds but does not send. |
+
+#### Returns `Promise<InitReferrerFeeAccountResult>`
+
+| Field | Type | Description |
+|---|---|---|
+| `signature` | `string` | Transaction signature. Empty string if `dryRun` or if the account already exists. |
+| `transaction` | `VersionedTransaction \| undefined` | Built init transaction when `dryRun: true`. |
+
+#### Example
+
+```ts
+const result = await hatch.initReferrerFeeAccount();
+if (result.signature) {
+  console.log(`https://solscan.io/tx/${result.signature}`);
 }
 ```
 
@@ -191,7 +256,8 @@ Sweep accumulated referral earnings to the signer's WSOL ATA. Only relevant if o
 
 | Field | Type | Description |
 |---|---|---|
-| `signature` | `string` | Transaction signature. |
+| `signature` | `string` | Transaction signature. Empty string if `dryRun`. |
+| `transaction` | `VersionedTransaction \| undefined` | Built claim transaction when `dryRun: true`. |
 
 #### Example
 
@@ -414,7 +480,13 @@ await hatch.launch({
 
 The referrer is **immutable** — it's written once when the LauncherPda is created and cannot be changed. On subsequent launches, the `referrer` field is ignored.
 
-The referrer can sweep their earnings anytime with `hatch.claimReferrerFees()`.
+The referrer should initialize their fee account once before referred users start claiming:
+
+```ts
+await hatch.initReferrerFeeAccount();
+```
+
+The referrer can then sweep their earnings anytime with `hatch.claimReferrerFees()`. `claimReferrerFees()` also auto-initializes the fee account if it is missing, but initializing it early is important so the 4% referrer cut is not redirected to treasury before the account exists.
 
 ## Fee rate options
 
@@ -452,7 +524,8 @@ const { transaction, setupTransaction, mint } = await hatch.launch({
 });
 
 // setupTransaction is present only if LauncherPda / WSOL ATA needs to be created.
-// Both are unsigned VersionedTransactions — sign and send them yourself.
+// The launch transaction is already signed by the SDK-generated mint/position keypairs.
+// You still sign both transactions with your wallet before sending.
 
 if (setupTransaction) {
   setupTransaction.sign([signer]);
@@ -460,7 +533,7 @@ if (setupTransaction) {
   // wait for confirmation...
 }
 
-transaction.sign([signer, mintKeypair, positionKeypair]);
+transaction.sign([signer]);
 await connection.sendTransaction(transaction);
 ```
 
@@ -630,11 +703,30 @@ LauncherPda and WSOL ATA already exist, so the setup tx is skipped.
 
 ---
 
+## Agent Safety
+
+This SDK is intended to be safe for launcher-side agents, but agents still need strong operational guardrails.
+
+- Scope: keep the public SDK limited to launcher-safe flows only. Do not ask agents to call rebalance/admin instructions from a different code path.
+- Signer handling: use a dedicated hot wallet with a tight SOL balance. Never give an agent your primary treasury or personal wallet.
+- Version pinning: install from a tag or commit SHA, not from a moving branch.
+- Simulation first: agents should default to `dryRun: true` or RPC simulation before asking for a live signature.
+- Human-readable summaries: before a user signs, the agent should summarize the mint, referrer, fee tier, setup requirement, and expected account creations.
+- Cluster checks: configure the RPC URL explicitly and have agents display the target cluster before sending.
+- Immutable actions: agents should warn that launch metadata URI and first-launch referrer assignment are effectively one-way decisions.
+- Referrer setup: if an agent is operating for a referrer, initialize the referrer fee account before referred launches start claiming fees.
+- Review low-level builders carefully: the high-level client is safer for agents than assembling arbitrary instruction bundles by hand.
+
+Open sourcing this SDK does not create new permissions by itself. It mainly makes the existing launcher flow easier to automate. The main risks are user footguns, bad agent behavior, and supply-chain/version drift, not new on-chain authority.
+
+---
+
 ## Security
 
 - An agent using this SDK needs your **signing keypair**. Only use a dedicated, limited-balance hot wallet for agent automation. Never hand your main wallet's keypair to an agent you didn't write.
 - The signer wallet pays for all on-chain rent and fees. Fund it with only as much SOL as you plan to use.
 - The SDK does not transmit your keypair anywhere — all signing happens locally.
+- Open-source availability does not grant anyone new permissions. Any real value-moving action still requires the user's signer.
 - Review the source code. It's MIT-licensed and fully readable.
 
 ## Support

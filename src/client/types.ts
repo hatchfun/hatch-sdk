@@ -57,9 +57,9 @@ export interface LaunchResult {
   lbPair: PublicKey;
   /** The locked Meteora position pubkey. */
   position: PublicKey;
-  /** The unsigned launch transaction (populated when dryRun is true). */
+  /** The launch transaction, pre-signed by any SDK-generated ephemeral signers when dryRun is true. */
   transaction?: VersionedTransaction;
-  /** The unsigned setup transaction (populated when dryRun is true and setup is needed). */
+  /** The setup transaction (populated when dryRun is true and setup is needed). */
   setupTransaction?: VersionedTransaction;
 }
 
@@ -73,8 +73,21 @@ export interface ClaimFeesParams {
 export interface ClaimFeesResult {
   /** Transaction signatures (one per claimed position). */
   signatures: string[];
-  /** Number of positions claimed in this call. */
+  /** Number of positions targeted in this call. */
   positionsClaimed: number;
+  /** Built claim transactions when dryRun is true. */
+  transactions?: VersionedTransaction[];
+}
+
+export interface InitReferrerFeeAccountParams {
+  /** If true, build the transaction but do not send. */
+  dryRun?: boolean;
+}
+
+export interface InitReferrerFeeAccountResult {
+  signature: string;
+  /** The built init transaction when dryRun is true. */
+  transaction?: VersionedTransaction;
 }
 
 export interface ClaimReferrerFeesParams {
@@ -84,6 +97,8 @@ export interface ClaimReferrerFeesParams {
 
 export interface ClaimReferrerFeesResult {
   signature: string;
+  /** The built claim transaction when dryRun is true. */
+  transaction?: VersionedTransaction;
 }
 
 export interface LaunchStatus {
