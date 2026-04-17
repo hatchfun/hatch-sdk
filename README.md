@@ -4,187 +4,636 @@ TypeScript SDK for launching tokens and claiming fees on [Hatch](https://hatch.f
 
 Designed to be agent-friendly: one client, four methods.
 
+---
+
+## Table of contents
+
+- [Prerequisites](#prerequisites)
+- [Install](#install)
+- [Setup](#setup)
+- [API reference](#api-reference)
+  - [`new HatchClient(config)`](#new-hatchclientconfig)
+  - [`hatch.launch(params)`](#hatchlaunchparams)
+  - [`hatch.claimFees(params)`](#hatchclaimfeesparams)
+  - [`hatch.claimReferrerFees(params?)`](#hatchclaimreferrerfeesparams)
+  - [`hatch.getLaunchStatus(params)`](#hatchgetlaunchstatusparams)
+- [Step-by-step: your first launch](#step-by-step-your-first-launch)
+- [Metadata JSON](#metadata-json)
+- [Referrals](#referrals)
+- [Fee rate options](#fee-rate-options)
+- [Dry run mode](#dry-run-mode)
+- [Cost breakdown](#cost-breakdown)
+- [Fee economics on claim](#fee-economics-on-claim)
+- [Advanced: instruction builders](#advanced-instruction-builders)
+- [How it works under the hood](#how-it-works-under-the-hood)
+- [Troubleshooting](#troubleshooting)
+- [Security](#security)
+- [License](#license)
+
+---
+
+## Prerequisites
+
+- **Node.js** 18+
+- **pnpm**, **npm**, or **yarn**
+- A **Solana keypair** (the signer / fee payer)
+- A **Solana RPC URL** — the public endpoint works for testing but use a paid provider (Helius, QuickNode, Triton) for production
+- **~0.3 SOL** in the signer wallet (0.25 SOL rent + fees, plus buffer)
+- A **publicly hosted metadata JSON file** (see [Metadata JSON](#metadata-json))
+
 ## Install
 
 ```bash
-pnpm add github:hatch/hatch-sdk
+# from GitHub (recommended — the SDK is not on npm yet)
+pnpm add github:Vasallius/hatch-sdk
 # or
-npm install github:hatch/hatch-sdk
+npm install github:Vasallius/hatch-sdk
 ```
 
-Peer runtime: Node 18+.
-
-## Quickstart
+## Setup
 
 ```ts
 import { Connection, Keypair } from "@solana/web3.js";
 import { HatchClient } from "hatch-sdk";
 
-const connection = new Connection(process.env.RPC_URL!, "confirmed");
-const signer = Keypair.fromSecretKey(/* your secret key bytes */);
+// 1. Connect to Solana
+const connection = new Connection("https://api.mainnet-beta.solana.com", "confirmed");
 
+// 2. Load your signer keypair
+//    The signer pays for all transactions and becomes the token launcher.
+const secretKey = Uint8Array.from(JSON.parse(fs.readFileSync("keypair.json", "utf-8")));
+const signer = Keypair.fromSecretKey(secretKey);
+
+// 3. Create the client
 const hatch = new HatchClient({ connection, signer });
+```
 
-// 1. Launch a token (mint + pool + locked position with 70% of supply)
-//    On a fresh wallet the SDK sends two sequential txs:
-//      - setup: InitializeLauncherPda + create WSOL ATA
-//      - launch: create token + pool + locked position
-//    On subsequent launches from the same wallet, only the launch tx runs.
-const { signature, setupSignature, mint, lbPair, position } = await hatch.launch({
+### Config options
+
+```ts
+const hatch = new HatchClient({
+  connection,                    // required — Solana RPC connection
+  signer,                        // required — Keypair that signs and pays
+  launchComputeUnitLimit: 1_200_000,  // optional — CU budget for launch tx (default: 1.2M)
+  claimComputeUnitLimit: 1_400_000,   // optional — CU budget for claim tx (default: 1.4M)
+});
+```
+
+---
+
+## API reference
+
+### `new HatchClient(config)`
+
+Creates a new SDK client.
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `connection` | `Connection` | yes | — | Solana RPC connection |
+| `signer` | `Keypair` | yes | — | Signs and pays for all transactions |
+| `launchComputeUnitLimit` | `number` | no | `1,200,000` | Compute unit budget for the launch transaction |
+| `claimComputeUnitLimit` | `number` | no | `1,400,000` | Compute unit budget for claim transactions |
+
+---
+
+### `hatch.launch(params)`
+
+Launch a new token with a locked Meteora DLMM position.
+
+#### Parameters
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `name` | `string` | yes | — | Token name, stored in Token-2022 metadata on-chain. **Immutable.** |
+| `symbol` | `string` | yes | — | Token ticker / symbol. **Immutable.** |
+| `uri` | `string` | yes | — | HTTPS URL pointing to a JSON metadata file. **Immutable on-chain.** See [Metadata JSON](#metadata-json). |
+| `referrer` | `PublicKey` | no | — | Referrer wallet pubkey. Only recorded on first launch (when LauncherPda is created). See [Referrals](#referrals). |
+| `feeRate` | `"1.00" \| "2.00" \| "5.00"` | no | `"1.00"` | Bonding curve fee rate for the pool. See [Fee rate options](#fee-rate-options). |
+| `dryRun` | `boolean` | no | `false` | If `true`, builds but does not send the transaction(s). See [Dry run mode](#dry-run-mode). |
+
+#### Returns `Promise<LaunchResult>`
+
+| Field | Type | Description |
+|---|---|---|
+| `signature` | `string` | Main launch transaction signature. Empty string if `dryRun`. |
+| `setupSignature` | `string \| undefined` | Setup transaction signature, present only if this was the first launch from this wallet (LauncherPda and/or WSOL ATA had to be created). |
+| `mint` | `PublicKey` | The newly-created SPL token mint address. |
+| `launcherPda` | `PublicKey` | The LauncherPda account that owns the locked position. Derived from signer. |
+| `lbPair` | `PublicKey` | The Meteora DLMM pool address. |
+| `position` | `PublicKey` | The locked Meteora position address. |
+| `transaction` | `VersionedTransaction \| undefined` | Unsigned launch transaction (only when `dryRun: true`). |
+| `setupTransaction` | `VersionedTransaction \| undefined` | Unsigned setup transaction (only when `dryRun: true` and setup is needed). |
+
+#### Example
+
+```ts
+const result = await hatch.launch({
   name: "My Token",
   symbol: "MYTOK",
   uri: "https://example.com/metadata.json",
 });
 
-// 2. Read on-chain status
-const status = await hatch.getLaunchStatus({ mint });
-console.log(`Claimable: ${status.totalClaimableSol} SOL`);
-
-// 3. Claim accrued WSOL fees on a launched token
-await hatch.claimFees({ mint });
-
-// 4. Sweep referral earnings (if any)
-await hatch.claimReferrerFees();
+console.log("Token mint:", result.mint.toBase58());
+console.log("Pool:", result.lbPair.toBase58());
+console.log("Tx:", `https://solscan.io/tx/${result.signature}`);
 ```
 
-## Metadata JSON
+---
 
-The `uri` you pass to `launch()` must resolve to a JSON file in the standard token-metadata format:
+### `hatch.claimFees(params)`
+
+Claim accrued WSOL fees from a launched token's position(s). The SDK automatically resolves all positions for the given mint under the signer's LauncherPda.
+
+#### Parameters
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `mint` | `PublicKey` | yes | — | The launched token mint to claim fees from. |
+| `dryRun` | `boolean` | no | `false` | If `true`, builds but does not send. |
+
+#### Returns `Promise<ClaimFeesResult>`
+
+| Field | Type | Description |
+|---|---|---|
+| `signatures` | `string[]` | Transaction signatures, one per claimed position. |
+| `positionsClaimed` | `number` | Number of positions that were claimed. |
+
+#### Example
+
+```ts
+import { PublicKey } from "@solana/web3.js";
+
+const result = await hatch.claimFees({
+  mint: new PublicKey("EoxWxMev..."),
+});
+
+console.log(`Claimed ${result.positionsClaimed} position(s)`);
+for (const sig of result.signatures) {
+  console.log(`  https://solscan.io/tx/${sig}`);
+}
+```
+
+---
+
+### `hatch.claimReferrerFees(params?)`
+
+Sweep accumulated referral earnings to the signer's WSOL ATA. Only relevant if other launchers used your wallet as their `referrer`.
+
+#### Parameters
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `dryRun` | `boolean` | no | `false` | If `true`, builds but does not send. |
+
+#### Returns `Promise<ClaimReferrerFeesResult>`
+
+| Field | Type | Description |
+|---|---|---|
+| `signature` | `string` | Transaction signature. |
+
+#### Example
+
+```ts
+const result = await hatch.claimReferrerFees();
+console.log(`https://solscan.io/tx/${result.signature}`);
+```
+
+---
+
+### `hatch.getLaunchStatus(params)`
+
+Read on-chain status for a launched token. Pure read — no transactions sent.
+
+#### Parameters
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `mint` | `PublicKey` | yes | — | The launched token mint to query. |
+
+#### Returns `Promise<LaunchStatus>`
+
+| Field | Type | Description |
+|---|---|---|
+| `mint` | `PublicKey` | The token mint queried. |
+| `launcherPda` | `PublicKey` | The LauncherPda derived from the signer. |
+| `launcherExists` | `boolean` | Whether the LauncherPda account exists on-chain. |
+| `positions` | `Array<Position>` | Matching positions (see below). |
+| `totalClaimableSol` | `number` | Aggregate claimable SOL (in SOL, not lamports) across all positions for this mint. |
+
+Each position in the array:
+
+| Field | Type | Description |
+|---|---|---|
+| `position` | `PublicKey` | Position account address. |
+| `lbPair` | `PublicKey` | The DLMM pool this position belongs to. |
+| `claimableSol` | `number` | Claimable WSOL from this position (in SOL, after the 20% treasury cut). |
+| `allTimeFeeSol` | `number` | All-time WSOL fees earned by this position (in SOL, after treasury cut). |
+| `activeBinId` | `number` | Current active bin of the pool. Higher = price has moved up. |
+
+#### Example
+
+```ts
+import { PublicKey } from "@solana/web3.js";
+
+const status = await hatch.getLaunchStatus({
+  mint: new PublicKey("EoxWxMev..."),
+});
+
+console.log("Positions:", status.positions.length);
+console.log("Claimable:", status.totalClaimableSol, "SOL");
+if (status.positions[0]) {
+  console.log("Active bin:", status.positions[0].activeBinId);
+}
+```
+
+---
+
+## Step-by-step: your first launch
+
+### 1. Generate a signer keypair
+
+```bash
+solana-keygen new --no-bip39-passphrase --outfile signer.json
+```
+
+Save the pubkey output — you'll fund it in the next step.
+
+### 2. Fund the signer
+
+Send **~0.3 SOL** (0.25 rent + fees, plus buffer) to the signer pubkey on **Solana mainnet**.
+
+### 3. Create and host your metadata JSON
+
+Create a file like this:
 
 ```json
 {
   "name": "My Token",
   "symbol": "MYTOK",
-  "description": "Optional description",
+  "description": "A short description of your token.",
   "image": "https://example.com/logo.png"
 }
 ```
 
-Host it anywhere reachable over HTTPS — S3, IPFS/Pinata, Arweave, a public GitHub Gist, your own server. The SDK does not upload metadata for you.
+Host it at a **permanent, public HTTPS URL**. Options:
+- **GitHub Gist** (public, pinned revision URL) — free, quick
+- **IPFS / Pinata** — decentralized, permanent
+- **Arweave** — truly permanent, ~$0.01
+- **Your own S3 / CloudFront** — full control
 
-> **⚠️ The URI is permanent on-chain.** Do not use URLs that may disappear or require auth:
-> - **Private GitHub repo `raw.githubusercontent.com` links** return 404 — broken image forever.
-> - **Signed URLs** / presigned S3 links expire.
-> - **Hot-swappable gist URLs** (without a revision hash) can break if the gist is later deleted or the default branch structure changes. Use the pinned `/raw/<commit-sha>/filename` form.
-> - **Host the image on a real CDN** (jsDelivr, your own S3/CloudFront, IPFS pinning service). Avoid private or ephemeral hosts.
+> **The URI is stored on-chain and cannot be changed after launch.**
+>
+> Do NOT use:
+> - Private GitHub repo `raw.githubusercontent.com` links (404 for everyone else)
+> - Presigned S3 URLs (they expire)
+> - Unpinned gist URLs (can break if gist is deleted)
 
-## Launch with a referrer
+### 4. Install the SDK
 
-Pass `referrer` on the first launch to immutably record it on your LauncherPda. The referrer earns 4% of your WSOL claim fees going forward (treasury share drops from 20% → 16%).
+```bash
+mkdir my-launch && cd my-launch
+pnpm init
+pnpm add github:Vasallius/hatch-sdk
+pnpm add -D tsx
+```
+
+### 5. Write your launch script
+
+```ts
+// launch.ts
+import { readFileSync } from "node:fs";
+import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
+import { HatchClient } from "hatch-sdk";
+
+async function main() {
+  const connection = new Connection("YOUR_RPC_URL", "confirmed");
+  const signer = Keypair.fromSecretKey(
+    Uint8Array.from(JSON.parse(readFileSync("signer.json", "utf-8"))),
+  );
+
+  console.log("Signer:", signer.publicKey.toBase58());
+  const balance = (await connection.getBalance(signer.publicKey)) / LAMPORTS_PER_SOL;
+  console.log("Balance:", balance, "SOL");
+
+  const hatch = new HatchClient({ connection, signer });
+
+  // Launch
+  const result = await hatch.launch({
+    name: "My Token",
+    symbol: "MYTOK",
+    uri: "https://your-permanent-metadata-url.json",
+  });
+
+  console.log("Launched!");
+  console.log("  Mint:", result.mint.toBase58());
+  console.log("  Pool:", result.lbPair.toBase58());
+  console.log("  Tx:", `https://solscan.io/tx/${result.signature}`);
+
+  // Check status
+  const status = await hatch.getLaunchStatus({ mint: result.mint });
+  console.log("  Active bin:", status.positions[0]?.activeBinId);
+  console.log("  Claimable:", status.totalClaimableSol, "SOL");
+}
+
+main().catch(console.error);
+```
+
+### 6. Run it
+
+```bash
+pnpm tsx launch.ts
+```
+
+Output:
+```
+Signer: FHdQ...mEn
+Balance: 0.3 SOL
+Launched!
+  Mint: Eox...5J
+  Pool: M1H...GC
+  Tx: https://solscan.io/tx/TcTr...Qes
+  Active bin: -444
+  Claimable: 0 SOL
+```
+
+### 7. Claim fees later
+
+Once people buy your token, fees accrue. Claim them:
+
+```ts
+const claimResult = await hatch.claimFees({
+  mint: new PublicKey("YOUR_TOKEN_MINT"),
+});
+console.log(`Claimed from ${claimResult.positionsClaimed} position(s)`);
+```
+
+---
+
+## Metadata JSON
+
+The `uri` parameter in `launch()` points to a JSON file that wallets (Phantom, Solflare) and explorers (Solscan, Birdeye) use to display your token. Expected format:
+
+```json
+{
+  "name": "My Token",
+  "symbol": "MYTOK",
+  "description": "Optional. Shown in explorers.",
+  "image": "https://permanent-url.com/logo.png"
+}
+```
+
+| Field | Required | Notes |
+|---|---|---|
+| `name` | yes | Display name in wallets. Should match what you pass to `launch()`. |
+| `symbol` | yes | Ticker. Should match the `symbol` param. |
+| `description` | no | Short description shown in explorers. |
+| `image` | yes | Direct URL to a PNG/JPG/SVG. Displayed as the token icon. Must be publicly accessible forever. |
+
+## Referrals
+
+The Hatch program has a built-in referral system. When a launcher has a referrer, the fee split on claims changes:
+
+| | No referrer | With referrer |
+|---|---|---|
+| Launcher (you) | 80% | 80% |
+| Treasury | 20% | 16% |
+| Referrer | — | 4% |
+
+To set a referrer, pass `referrer` on your **first launch** (the one that creates your LauncherPda):
 
 ```ts
 await hatch.launch({
   name: "My Token",
   symbol: "MYTOK",
-  uri: "https://example.com/metadata.json",
-  referrer: new PublicKey("..."),
+  uri: "...",
+  referrer: new PublicKey("REFERRER_WALLET_PUBKEY"),
 });
 ```
 
-The referrer is only written on the first launch (when your LauncherPda is created). Subsequent launches ignore the `referrer` field.
+The referrer is **immutable** — it's written once when the LauncherPda is created and cannot be changed. On subsequent launches, the `referrer` field is ignored.
+
+The referrer can sweep their earnings anytime with `hatch.claimReferrerFees()`.
 
 ## Fee rate options
 
-Default is **1.00%** bonding curve fee. Override:
+The pool's bonding curve fee rate determines how much of each swap goes to the position as fees. Higher fee = more earnings per trade, but wider spread may reduce trading volume.
+
+| Rate | Preset address | Notes |
+|---|---|---|
+| `"1.00"` | `Ak1mPM23...` | Default. Best for most launches. |
+| `"2.00"` | `4DovFrjt...` | Higher fees, wider spread. |
+| `"5.00"` | `7pz5PW7s...` | Aggressive. Use only if you expect low volume but want max capture. |
 
 ```ts
 await hatch.launch({
-  name: "My Token",
-  symbol: "MYTOK",
+  name: "...",
+  symbol: "...",
   uri: "...",
-  feeRate: "2.00", // "1.00" | "2.00" | "5.00"
+  feeRate: "2.00",
 });
 ```
 
-## Dry run
+## Dry run mode
 
-Build a transaction without sending. Useful for simulating, inspecting, or signing elsewhere.
+All methods accept `dryRun: true`. This builds the transaction(s) but does **not** send them. Useful for:
+- Simulating to check if the tx would succeed
+- Inspecting the tx before signing
+- Signing with a different signer (e.g., a hardware wallet)
 
 ```ts
-const { transaction, mint } = await hatch.launch({
-  name: "My Token",
-  symbol: "MYTOK",
+// Dry run launch
+const { transaction, setupTransaction, mint } = await hatch.launch({
+  name: "...",
+  symbol: "...",
   uri: "...",
   dryRun: true,
 });
-// transaction is a VersionedTransaction — sign and send yourself
+
+// setupTransaction is present only if LauncherPda / WSOL ATA needs to be created.
+// Both are unsigned VersionedTransactions — sign and send them yourself.
+
+if (setupTransaction) {
+  setupTransaction.sign([signer]);
+  await connection.sendTransaction(setupTransaction);
+  // wait for confirmation...
+}
+
+transaction.sign([signer, mintKeypair, positionKeypair]);
+await connection.sendTransaction(transaction);
 ```
 
-## Cost expectations
+## Cost breakdown
 
-A launch costs **~0.25 SOL** in rent + fees, paid by the signer wallet:
+A launch costs **~0.25 SOL** in rent + transaction fees, paid by the signer:
 
-| Item | SOL |
-|---|---|
-| Token-2022 mint rent | ~0.15 |
-| LauncherPda (first launch only) | ~0.006 |
-| Launch token account rent | ~0.05 |
-| DLMM pool rent | ~0.02 |
-| Position account rent | ~0.02 |
-| Transaction fees | ~0.002 |
+| Item | SOL | Notes |
+|---|---|---|
+| Token-2022 mint | ~0.15 | Rent for the mint account with metadata extension |
+| Launch token account | ~0.05 | Holds the 30% reserve supply |
+| DLMM pool | ~0.02 | Meteora lbPair account rent |
+| Position account | ~0.02 | Locked position rent |
+| LauncherPda | ~0.006 | First launch only — skipped on subsequent launches |
+| WSOL ATA | ~0.002 | First launch only |
+| Transaction fees | ~0.002 | Two txs on first launch, one on subsequent |
 
-Fund the signer wallet before calling `launch()`.
+**Measured on mainnet:** 0.254 SOL for a fresh-wallet launch.
+
+Rent is recoverable if accounts are closed (but the locked position is permanent by design).
 
 ## Fee economics on claim
 
 When you call `claimFees()`:
-- All accrued token-side fees are burned on-chain.
-- 20% of accrued WSOL → Hatch treasury (or 16%/4% treasury/referrer if you have one).
-- Remainder → your signer's WSOL ATA.
 
-## Runnable example
+1. **Token-side fees** (the launched token) — burned on-chain. You never receive these.
+2. **WSOL-side fees** — split as follows:
 
-`examples/smoke-launch.ts` does a full launch + status read + claim cycle end-to-end on mainnet. To run:
+| Recipient | % | Notes |
+|---|---|---|
+| You (launcher) | 80% | Sent to your WSOL ATA, unwrap to SOL yourself |
+| Hatch treasury | 20% | Protocol fee. Drops to 16% if you have a referrer. |
+| Referrer | 0% or 4% | Only if your LauncherPda has a referrer set. |
 
-```bash
-cp examples/.env.example examples/.env
-# edit examples/.env with your RPC_URL and METADATA_URI
-solana-keygen new --no-bip39-passphrase --outfile .smoke-keypair.json
-# fund the generated pubkey with ~0.3 SOL on mainnet
-pnpm tsx examples/smoke-launch.ts
-```
-
-The script prints Solscan links for the setup tx, launch tx, and claim tx.
+The WSOL lands in your signer's associated token account. Use `spl-token unwrap` or any wallet to convert to SOL.
 
 ## Advanced: instruction builders
 
-The high-level client is a thin wrapper over exported primitives. Compose your own transactions:
+The high-level `HatchClient` is a thin wrapper. For full control over transaction composition, import the primitives directly:
 
 ```ts
 import {
+  // Launch instructions
   buildCreateTokenAndLaunchAccountIx,
   buildCreatePoolAndLockedPositionIx,
   buildInitializeLauncherPdaIx,
+
+  // Fee instructions
   buildClaimFeeManualIx,
   buildClaimReferrerFeesIx,
   buildInitPoolFeeAccountIx,
+  buildInitReferrerFeeAccountIx,
+
+  // PDA helpers
   deriveLauncherPda,
   deriveLaunchTokenAccount,
   derivePoolFeeAccount,
   deriveReferrerFeeAccount,
   launcherPdaExists,
   readLauncherPdaReferrer,
+
+  // Meteora helpers
+  deriveLbPair,
+  deriveMeteoraPoolAccounts,
+  findMeteoraTickArrays,
+  findMeteoraClaimTickArrays,
+
+  // Constants
   GLOBAL_ALTS,
   HATCH_PROGRAM_ID,
   HATCH_TREASURY,
   WSOL_MINT,
+  METEORA_DLMM_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
 } from "hatch-sdk";
 ```
 
-Subpath imports are also supported: `hatch-sdk/launch`, `hatch-sdk/fees`, `hatch-sdk/pda`, `hatch-sdk/meteora`, `hatch-sdk/constants`, `hatch-sdk/utils`.
+Subpath imports also work:
+
+```ts
+import { buildCreateTokenAndLaunchAccountIx } from "hatch-sdk/launch";
+import { buildClaimFeeManualIx } from "hatch-sdk/fees";
+import { deriveLauncherPda } from "hatch-sdk/pda";
+import { deriveLbPair } from "hatch-sdk/meteora";
+import { HATCH_PROGRAM_ID } from "hatch-sdk/constants";
+```
+
+---
+
+## How it works under the hood
+
+### Token properties (all hardcoded by the Hatch program)
+
+| Property | Value |
+|---|---|
+| Token program | Token-2022 (SPL Token Extensions) |
+| Decimals | 6 |
+| Total supply | 1,000,000,000 (1 billion) |
+| Metadata | Token-2022 native `TokenMetadata` extension (not Metaplex) |
+| Mint authority | Disabled after initial mint |
+| Freeze authority | None |
+
+### Pool properties (all hardcoded by the Hatch program)
+
+| Property | Value |
+|---|---|
+| DEX | Meteora DLMM |
+| Quote token | WSOL |
+| Strategy | CurveImBalanced (type 7) |
+| Bin range | -444 to -375 (70 bins) |
+| Starting active bin | -444 (bottom — price goes up as people buy) |
+| Liquidity locked | 70% of supply (700M tokens) |
+| Remaining supply | 30% held in the launch token account |
+| Position | Permanently locked — cannot be withdrawn |
+
+### Transaction flow
+
+**First launch from a wallet (2 transactions):**
+
+```
+Setup tx (small, ~400 bytes):
+  1. InitializeLauncherPda — creates PDA ["launcher", authority]
+  2. CreateAssociatedTokenAccount — WSOL ATA for the LauncherPda
+
+Launch tx (~1100 bytes with ALTs):
+  1. ComputeBudget.setComputeUnitLimit(1.2M)
+  2. CreateTokenAndLaunchAccount — mints 1B Token-2022, stores metadata
+  3. CreatePoolAndLockedPosition — creates DLMM pair + locked 70-bin position
+```
+
+**Subsequent launches (1 transaction):**
+
+LauncherPda and WSOL ATA already exist, so the setup tx is skipped.
+
+**Claim tx (~800 bytes with ALTs):**
+
+```
+  1. ComputeBudget.setComputeUnitLimit(1.4M)
+  2. CreateAssociatedTokenAccount (idempotent) — treasury WSOL ATA
+  3. CreateAssociatedTokenAccount (idempotent) — signer WSOL ATA
+  4. InitPoolFeeAccount (if not yet initialized)
+  5. ClaimFeeManual — claims fees, burns token side, splits WSOL
+```
+
+### On-chain accounts
+
+| Account | Derivation | Purpose |
+|---|---|---|
+| LauncherPda | `PDA["launcher", authority]` | Owns all positions for this wallet. Stores referrer. One per wallet, created on first launch. |
+| LaunchTokenAccount | `PDA["launch-token", mint, launcherPda]` | Holds the 30% reserve supply. |
+| PoolFeeAccount | `PDA["pool_fees", launcherPda, lbPair]` | Accumulates WSOL fees before claim. |
+| ReferrerFeeAccount | `PDA["referrer_fees", referrerLauncherPda]` | Accumulates the referrer's 4% share. |
+
+---
 
 ## Troubleshooting
 
-- **`VersionedTransaction too large: 1261 bytes (max: encoded/raw 1644/1232)`** — You're on a version before the split-tx fix. Upgrade to the latest `main`. From a fresh wallet, the SDK now splits setup (LauncherPda + WSOL ATA) and launch (token + pool) into two sequential transactions to stay under the 1232-byte limit.
-- **`No claimable positions found for mint ...`** — The signer's LauncherPda doesn't own a position for that mint. Check `getLaunchStatus({ mint })`.
-- **`Insufficient funds`** or simulation errors on `launch()` — signer wallet needs ~0.25 SOL.
-- **Transaction simulation fails with compute budget error** — bump `launchComputeUnitLimit` / `claimComputeUnitLimit` in `HatchClient` config.
-- **RPC timeouts** — use a paid RPC (Helius, QuickNode, Triton) instead of public RPC for production.
-- **Launched token shows a broken image in Phantom/Solscan** — your metadata `image` URL is unreachable. Common causes: hosted on a private GitHub repo, presigned S3 URL that expired, or an unpinned gist URL. The on-chain URI is immutable; you'll need to relaunch.
+| Error | Cause | Fix |
+|---|---|---|
+| `VersionedTransaction too large: 1261 bytes` | Old SDK version bundled all ixs in one tx | Upgrade to latest `main` — the SDK now splits setup and launch into separate txs |
+| `No claimable positions found for mint ...` | Signer's LauncherPda doesn't own a position for that mint | Check `getLaunchStatus({ mint })` — are you using the right signer? |
+| `Insufficient funds` or simulation failure on `launch()` | Signer wallet balance too low | Fund with ~0.3 SOL |
+| Transaction simulation fails with compute budget error | CU limit too low for this specific pool state | Pass `launchComputeUnitLimit` / `claimComputeUnitLimit` in `HatchClient` config |
+| RPC timeouts or 429 errors | Public RPC rate-limited | Use a paid RPC provider (Helius, QuickNode, Triton) |
+| Token shows broken image in Phantom / Solscan | Metadata `image` URL is unreachable | Image must be on a permanent, public URL. The on-chain URI is immutable — you'll need to relaunch with a fixed URI. |
+| `bigint: Failed to load bindings, pure JS will be used` | Native `bigint-buffer` module not compiled | Harmless warning. Does not affect functionality. Run `pnpm approve-builds` then `pnpm rebuild` if you want to suppress it. |
 
-## Security note
+---
 
-An agent using this SDK needs your signing key. **Only use a dedicated, limited-balance hot wallet for agent automation.** Never hand your main wallet's keypair to an agent you didn't write.
+## Security
+
+- An agent using this SDK needs your **signing keypair**. Only use a dedicated, limited-balance hot wallet for agent automation. Never hand your main wallet's keypair to an agent you didn't write.
+- The signer wallet pays for all on-chain rent and fees. Fund it with only as much SOL as you plan to use.
+- The SDK does not transmit your keypair anywhere — all signing happens locally.
+- Review the source code. It's MIT-licensed and fully readable.
 
 ## Support
 
