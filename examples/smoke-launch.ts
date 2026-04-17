@@ -2,7 +2,7 @@
  * Smoke test: runs a real launch on mainnet using the SDK.
  *
  * Reads:
- *   - RPC_URL from env (or the NEXT_PUBLIC_RPC_ENDPOINT in examples/.env)
+ *   - RPC_URL from env (or examples/.env)
  *   - SIGNER_KEYPAIR_PATH from env (defaults to ../.smoke-keypair.json)
  *   - METADATA_URI from env
  *

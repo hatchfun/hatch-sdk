@@ -45,10 +45,12 @@ Designed to be agent-friendly: one client, four methods.
 
 ```bash
 # from GitHub (recommended — the SDK is not on npm yet)
-pnpm add github:Vasallius/hatch-sdk
+pnpm add github:hatchfun/hatch-sdk
 # or
-npm install github:Vasallius/hatch-sdk
+npm install github:hatchfun/hatch-sdk
 ```
+
+> **Note:** The SDK ships TypeScript source (no compiled JS). Your project must handle `.ts` imports — use `tsx`, `ts-node`, or a bundler that supports TypeScript.
 
 ## Setup
 
@@ -57,7 +59,7 @@ import { Connection, Keypair } from "@solana/web3.js";
 import { HatchClient } from "hatch-sdk";
 
 // 1. Connect to Solana
-const connection = new Connection("https://api.mainnet-beta.solana.com", "confirmed");
+const connection = new Connection("YOUR_RPC_URL", "confirmed");
 
 // 2. Load your signer keypair
 //    The signer pays for all transactions and becomes the token launcher.
@@ -293,7 +295,7 @@ Host it at a **permanent, public HTTPS URL**. Options:
 ```bash
 mkdir my-launch && cd my-launch
 pnpm init
-pnpm add github:Vasallius/hatch-sdk
+pnpm add github:hatchfun/hatch-sdk
 pnpm add -D tsx
 ```
 

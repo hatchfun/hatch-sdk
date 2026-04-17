@@ -52,8 +52,13 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/hatch/hatch-sdk.git"
+    "url": "https://github.com/hatchfun/hatch-sdk.git"
   },
+  "files": [
+    "src/",
+    "LICENSE",
+    "README.md"
+  ],
   "keywords": [
     "solana",
     "hatch",
