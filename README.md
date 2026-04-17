@@ -10,6 +10,8 @@ Designed to be agent-friendly: one client, five methods.
 
 - [Prerequisites](#prerequisites)
 - [Install](#install)
+- [Versioning](#versioning)
+- [Public Usage Policy](#public-usage-policy)
 - [Setup](#setup)
 - [API reference](#api-reference)
   - [`new HatchClient(config)`](#new-hatchclientconfig)
@@ -28,6 +30,7 @@ Designed to be agent-friendly: one client, five methods.
 - [Advanced: instruction builders](#advanced-instruction-builders)
 - [How it works under the hood](#how-it-works-under-the-hood)
 - [Troubleshooting](#troubleshooting)
+- [Agent Safety](#agent-safety)
 - [Security](#security)
 - [License](#license)
 
@@ -45,13 +48,44 @@ Designed to be agent-friendly: one client, five methods.
 ## Install
 
 ```bash
-# from GitHub (recommended — the SDK is not on npm yet)
-pnpm add github:hatchfun/hatch-sdk
+# from GitHub (recommended — pin to a tag or commit, not a moving branch)
+pnpm add github:hatchfun/hatch-sdk#TAG_OR_COMMIT
 # or
-npm install github:hatchfun/hatch-sdk
+npm install github:hatchfun/hatch-sdk#TAG_OR_COMMIT
 ```
 
 > **Note:** The SDK ships TypeScript source (no compiled JS). Your project must handle `.ts` imports — use `tsx`, `ts-node`, or a bundler that supports TypeScript.
+> **Recommendation:** For agents and production automation, pin to a Git tag or commit SHA. Avoid installing from a moving branch like `main`.
+
+## Versioning
+
+This SDK is not on npm yet. If you plan to share it publicly for agents, prefer one of these release models:
+
+- Best: publish tagged GitHub releases and have users install by tag or commit SHA.
+- Better than nothing: tell users to pin a specific commit SHA.
+- Avoid: telling users to clone or install straight from a moving `main` branch.
+
+Why:
+
+- agents are more reliable when everyone uses the same exact SDK build
+- rollback is simpler if a bad change lands
+- audit findings and support requests are easier to map to a concrete version
+- supply-chain risk is lower when consumers pin immutable refs
+
+If you do not want npm overhead yet, GitHub tags are enough. You do not need a registry publish to get the safety benefits of versioning.
+
+## Public Usage Policy
+
+If you are consuming this SDK from outside Hatch, use these rules:
+
+- Supported install target: a tagged release or pinned commit SHA.
+- Not a supported install target: a moving branch such as `main`.
+- Recommended interface for agents: the high-level `HatchClient`.
+- Advanced interface: the low-level instruction builders are available, but they are easier to misuse and should be treated as expert-only.
+- Signing policy: simulate and review before requesting a live signature.
+- Wallet policy: use a dedicated launcher hot wallet with limited SOL balance.
+
+In short: pin versions, prefer the high-level client, and do not treat `main` as a stable release channel.
 
 ## Setup
 
@@ -668,11 +702,30 @@ LauncherPda and WSOL ATA already exist, so the setup tx is skipped.
 
 ---
 
+## Agent Safety
+
+This SDK is intended to be safe for launcher-side agents, but agents still need strong operational guardrails.
+
+- Scope: keep the public SDK limited to launcher-safe flows only. Do not ask agents to call rebalance/admin instructions from a different code path.
+- Signer handling: use a dedicated hot wallet with a tight SOL balance. Never give an agent your primary treasury or personal wallet.
+- Version pinning: install from a tag or commit SHA, not from a moving branch.
+- Simulation first: agents should default to `dryRun: true` or RPC simulation before asking for a live signature.
+- Human-readable summaries: before a user signs, the agent should summarize the mint, referrer, fee tier, setup requirement, and expected account creations.
+- Cluster checks: configure the RPC URL explicitly and have agents display the target cluster before sending.
+- Immutable actions: agents should warn that launch metadata URI and first-launch referrer assignment are effectively one-way decisions.
+- Referrer setup: if an agent is operating for a referrer, initialize the referrer fee account before referred launches start claiming fees.
+- Review low-level builders carefully: the high-level client is safer for agents than assembling arbitrary instruction bundles by hand.
+
+Open sourcing this SDK does not create new permissions by itself. It mainly makes the existing launcher flow easier to automate. The main risks are user footguns, bad agent behavior, and supply-chain/version drift, not new on-chain authority.
+
+---
+
 ## Security
 
 - An agent using this SDK needs your **signing keypair**. Only use a dedicated, limited-balance hot wallet for agent automation. Never hand your main wallet's keypair to an agent you didn't write.
 - The signer wallet pays for all on-chain rent and fees. Fund it with only as much SOL as you plan to use.
 - The SDK does not transmit your keypair anywhere — all signing happens locally.
+- Open-source availability does not grant anyone new permissions. Any real value-moving action still requires the user's signer.
 - Review the source code. It's MIT-licensed and fully readable.
 
 ## Support
