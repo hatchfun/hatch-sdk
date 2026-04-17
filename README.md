@@ -49,9 +49,9 @@ Designed to be agent-friendly: one client, five methods.
 
 ```bash
 # from GitHub (recommended — pin to a tag or commit, not a moving branch)
-pnpm add github:hatchfun/hatch-sdk#TAG_OR_COMMIT
+pnpm add github:hatchfun/hatch-sdk#v0.1.0
 # or
-npm install github:hatchfun/hatch-sdk#TAG_OR_COMMIT
+npm install github:hatchfun/hatch-sdk#v0.1.0
 ```
 
 > **Note:** The SDK ships TypeScript source (no compiled JS). Your project must handle `.ts` imports — use `tsx`, `ts-node`, or a bundler that supports TypeScript.
@@ -80,6 +80,7 @@ If you are consuming this SDK from outside Hatch, use these rules:
 
 - Supported install target: a tagged release or pinned commit SHA.
 - Not a supported install target: a moving branch such as `main`.
+- Current recommended install target: `github:hatchfun/hatch-sdk#v0.1.0`
 - Recommended interface for agents: the high-level `HatchClient`.
 - Advanced interface: the low-level instruction builders are available, but they are easier to misuse and should be treated as expert-only.
 - Signing policy: simulate and review before requesting a live signature.
