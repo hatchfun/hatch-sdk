@@ -2,7 +2,7 @@
 
 TypeScript SDK for launching tokens and claiming fees on [Hatch](https://hatch.fm) — a Solana token launcher built on Meteora DLMM.
 
-Designed to be agent-friendly: one client, four methods.
+Designed to be agent-friendly: one client, five methods.
 
 ---
 
@@ -15,6 +15,7 @@ Designed to be agent-friendly: one client, four methods.
   - [`new HatchClient(config)`](#new-hatchclientconfig)
   - [`hatch.launch(params)`](#hatchlaunchparams)
   - [`hatch.claimFees(params)`](#hatchclaimfeesparams)
+  - [`hatch.initReferrerFeeAccount(params?)`](#hatchinitreferrerfeeaccountparams)
   - [`hatch.claimReferrerFees(params?)`](#hatchclaimreferrerfeesparams)
   - [`hatch.getLaunchStatus(params)`](#hatchgetlaunchstatusparams)
 - [Step-by-step: your first launch](#step-by-step-your-first-launch)
@@ -123,8 +124,8 @@ Launch a new token with a locked Meteora DLMM position.
 | `launcherPda` | `PublicKey` | The LauncherPda account that owns the locked position. Derived from signer. |
 | `lbPair` | `PublicKey` | The Meteora DLMM pool address. |
 | `position` | `PublicKey` | The locked Meteora position address. |
-| `transaction` | `VersionedTransaction \| undefined` | Unsigned launch transaction (only when `dryRun: true`). |
-| `setupTransaction` | `VersionedTransaction \| undefined` | Unsigned setup transaction (only when `dryRun: true` and setup is needed). |
+| `transaction` | `VersionedTransaction \| undefined` | Launch transaction, already signed by any SDK-generated ephemeral signers when `dryRun: true`. You still sign with your wallet before sending. |
+| `setupTransaction` | `VersionedTransaction \| undefined` | Setup transaction (only when `dryRun: true` and setup is needed). |
 
 #### Example
 
@@ -158,7 +159,8 @@ Claim accrued WSOL fees from a launched token's position(s). The SDK automatical
 | Field | Type | Description |
 |---|---|---|
 | `signatures` | `string[]` | Transaction signatures, one per claimed position. |
-| `positionsClaimed` | `number` | Number of positions that were claimed. |
+| `positionsClaimed` | `number` | Number of positions targeted in this call. |
+| `transactions` | `VersionedTransaction[] \| undefined` | Built claim transactions when `dryRun: true`, one per targeted position. |
 
 #### Example
 
@@ -172,6 +174,34 @@ const result = await hatch.claimFees({
 console.log(`Claimed ${result.positionsClaimed} position(s)`);
 for (const sig of result.signatures) {
   console.log(`  https://solscan.io/tx/${sig}`);
+}
+```
+
+---
+
+### `hatch.initReferrerFeeAccount(params?)`
+
+Initialize the signer's referrer fee account PDA. A referrer should do this once before referred users start claiming fees, otherwise Hatch falls back to sending the 4% referrer cut to treasury.
+
+#### Parameters
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `dryRun` | `boolean` | no | `false` | If `true`, builds but does not send. |
+
+#### Returns `Promise<InitReferrerFeeAccountResult>`
+
+| Field | Type | Description |
+|---|---|---|
+| `signature` | `string` | Transaction signature. Empty string if `dryRun` or if the account already exists. |
+| `transaction` | `VersionedTransaction \| undefined` | Built init transaction when `dryRun: true`. |
+
+#### Example
+
+```ts
+const result = await hatch.initReferrerFeeAccount();
+if (result.signature) {
+  console.log(`https://solscan.io/tx/${result.signature}`);
 }
 ```
 
@@ -191,7 +221,8 @@ Sweep accumulated referral earnings to the signer's WSOL ATA. Only relevant if o
 
 | Field | Type | Description |
 |---|---|---|
-| `signature` | `string` | Transaction signature. |
+| `signature` | `string` | Transaction signature. Empty string if `dryRun`. |
+| `transaction` | `VersionedTransaction \| undefined` | Built claim transaction when `dryRun: true`. |
 
 #### Example
 
@@ -414,7 +445,13 @@ await hatch.launch({
 
 The referrer is **immutable** — it's written once when the LauncherPda is created and cannot be changed. On subsequent launches, the `referrer` field is ignored.
 
-The referrer can sweep their earnings anytime with `hatch.claimReferrerFees()`.
+The referrer should initialize their fee account once before referred users start claiming:
+
+```ts
+await hatch.initReferrerFeeAccount();
+```
+
+The referrer can then sweep their earnings anytime with `hatch.claimReferrerFees()`. `claimReferrerFees()` also auto-initializes the fee account if it is missing, but initializing it early is important so the 4% referrer cut is not redirected to treasury before the account exists.
 
 ## Fee rate options
 
@@ -452,7 +489,8 @@ const { transaction, setupTransaction, mint } = await hatch.launch({
 });
 
 // setupTransaction is present only if LauncherPda / WSOL ATA needs to be created.
-// Both are unsigned VersionedTransactions — sign and send them yourself.
+// The launch transaction is already signed by the SDK-generated mint/position keypairs.
+// You still sign both transactions with your wallet before sending.
 
 if (setupTransaction) {
   setupTransaction.sign([signer]);
@@ -460,7 +498,7 @@ if (setupTransaction) {
   // wait for confirmation...
 }
 
-transaction.sign([signer, mintKeypair, positionKeypair]);
+transaction.sign([signer]);
 await connection.sendTransaction(transaction);
 ```
 
