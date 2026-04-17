@@ -1,6 +1,6 @@
 # hatch-sdk
 
-TypeScript SDK for launching tokens and claiming fees on [Hatch](https://hatch.fm) — a Solana token launcher built on Meteora DLMM.
+TypeScript SDK for launching tokens and claiming fees on [Hatch](https://hatchfun.xyz/) — a Solana token launcher built on Meteora DLMM.
 
 Designed to be agent-friendly: one client, five methods.
 
