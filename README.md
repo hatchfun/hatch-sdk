@@ -22,6 +22,7 @@ Designed to be agent-friendly: one client, five methods.
   - [`hatch.getLaunchStatus(params)`](#hatchgetlaunchstatusparams)
 - [Step-by-step: your first launch](#step-by-step-your-first-launch)
 - [Metadata JSON](#metadata-json)
+- [Agent Launch Checklist](#agent-launch-checklist)
 - [Referrals](#referrals)
 - [Fee rate options](#fee-rate-options)
 - [Dry run mode](#dry-run-mode)
@@ -332,6 +333,13 @@ Send **~0.3 SOL** (0.25 rent + fees, plus buffer) to the signer pubkey on **Sola
 
 ### 3. Create and host your metadata JSON
 
+The `uri` you pass to `launch()` must be the URL of a JSON file, not the URL of the token image itself.
+
+Use this pattern:
+
+- `uri`: `https://your-domain.com/metadata/my-token.json`
+- `image` inside that JSON: `https://your-domain.com/images/my-token.png`
+
 Create a file like this:
 
 ```json
@@ -348,6 +356,19 @@ Host it at a **permanent, public HTTPS URL**. Options:
 - **IPFS / Pinata** — decentralized, permanent
 - **Arweave** — truly permanent, ~$0.01
 - **Your own S3 / CloudFront** — full control
+
+Before launch, verify:
+
+- the JSON URL opens publicly in a browser
+- the URL returns JSON, not HTML
+- the `image` URL opens directly as an image
+- `name` and `symbol` match the values you will pass to `launch()`
+- both URLs are permanent, because the on-chain `uri` is immutable
+
+Helpful files in this repo:
+
+- [examples/metadata-template.json](/Users/lorenzoampil_1/global/hatch-sdk/examples/metadata-template.json)
+- `pnpm tsx examples/validate-metadata.ts <metadata-json-path-or-url>`
 
 > **The URI is stored on-chain and cannot be changed after launch.**
 >
@@ -456,6 +477,101 @@ The `uri` parameter in `launch()` points to a JSON file that wallets (Phantom, S
 | `symbol` | yes | Ticker. Should match the `symbol` param. |
 | `description` | no | Short description shown in explorers. |
 | `image` | yes | Direct URL to a PNG/JPG/SVG. Displayed as the token icon. Must be publicly accessible forever. |
+
+Important distinction:
+
+- `launch({ uri })` expects the metadata JSON URL
+- the `image` field inside that JSON expects the direct image URL
+
+Good:
+
+```ts
+await hatch.launch({
+  name: "hat",
+  symbol: "hat",
+  uri: "https://example.com/metadata/hat.json",
+});
+```
+
+Where `https://example.com/metadata/hat.json` contains:
+
+```json
+{
+  "name": "hat",
+  "symbol": "hat",
+  "description": "hat token",
+  "image": "https://example.com/images/hat.png"
+}
+```
+
+Bad:
+
+```ts
+await hatch.launch({
+  name: "hat",
+  symbol: "hat",
+  uri: "https://example.com/images/hat.png"
+});
+```
+
+That passes an image URL where Hatch expects a metadata JSON URL.
+
+Suggested agent workflow for metadata:
+
+1. Ask the user for `name`, `symbol`, short description, and image URL.
+2. Create a metadata JSON document using those fields.
+3. Host the JSON at a permanent public URL.
+4. Verify both the JSON URL and image URL load correctly.
+5. Read back the exact `uri` that will be written on-chain before asking for signature.
+
+Suggested metadata template:
+
+```json
+{
+  "name": "TOKEN_NAME",
+  "symbol": "TICKER",
+  "description": "Short description shown in explorers and wallets.",
+  "image": "https://your-public-image-url.png"
+}
+```
+
+If an agent is helping a user launch, it should explicitly confirm:
+
+- the metadata JSON URL that will be used as `uri`
+- the image URL inside that JSON
+- that both URLs are public and permanent
+
+You can validate a local file or hosted URL with:
+
+```bash
+pnpm tsx examples/validate-metadata.ts examples/metadata-template.json
+# or
+pnpm tsx examples/validate-metadata.ts https://your-domain.com/metadata/my-token.json
+```
+
+## Agent Launch Checklist
+
+If an agent is launching a token from scratch, this is the recommended order:
+
+1. Ask for the target cluster and RPC URL.
+2. Ask for the signer wallet path or signing method.
+3. Ask for `name`, `symbol`, short description, image URL, fee tier, and optional referrer.
+4. Create the metadata JSON from those fields.
+5. Host the metadata JSON at a permanent public URL.
+6. Validate the metadata JSON URL and image URL.
+7. Read back the exact launch inputs:
+   - `name`
+   - `symbol`
+   - metadata JSON `uri`
+   - image URL inside the metadata JSON
+   - fee tier
+   - referrer, if any
+   - cluster / RPC target
+8. Run `dryRun: true` or RPC simulation first.
+9. Show the user the simulation result and expected account creations.
+10. Only then ask for approval to send the real launch transaction.
+
+This is the safest and clearest workflow for agent-assisted launches.
 
 ## Referrals
 

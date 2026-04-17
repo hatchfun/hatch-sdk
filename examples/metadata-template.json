@@ -1,0 +1,6 @@
+{
+  "name": "TOKEN_NAME",
+  "symbol": "TICKER",
+  "description": "Short description shown in explorers and wallets.",
+  "image": "https://your-public-image-url.png"
+}
