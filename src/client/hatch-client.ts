@@ -267,6 +267,13 @@ export class HatchClient {
       if (launchedMint.toBase58() !== mintStr) continue;
 
       for (const posData of info.lbPairPositionsData) {
+        // Skip positions with no claimable WSOL fees. Wide empty positions (e.g. ones
+        // spanning many bin arrays) require so many account metas that the resulting
+        // claim tx overflows Solana's 1232-byte size limit even with ALTs, and the
+        // throw aborts the whole loop — leaving non-empty positions unclaimed.
+        const feeY = posData.positionData?.feeY?.toNumber?.() ?? 0;
+        if (feeY <= 0) continue;
+
         claimTargets.push({
           lbPair: new PublicKey(lbPairStr),
           position: posData.publicKey,
@@ -293,104 +300,116 @@ export class HatchClient {
 
     const signatures: string[] = [];
     const transactions: VersionedTransaction[] = [];
+    const failures: Array<{ position: string; error: string }> = [];
     for (const target of claimTargets) {
-      const instructions: TransactionInstruction[] = [];
-      instructions.push(
-        ComputeBudgetProgram.setComputeUnitLimit({
-          units: this.config.claimComputeUnitLimit,
-        }),
-      );
-
-      const treasuryTokenY = getAssociatedTokenAddressSync(
-        target.tokenMintY,
-        HATCH_TREASURY,
-        true,
-        target.tokenProgramY,
-      );
-      instructions.push(
-        createAssociatedTokenAccountIdempotentInstruction(
-          authority,
-          treasuryTokenY,
-          HATCH_TREASURY,
-          target.tokenMintY,
-          target.tokenProgramY,
-        ),
-      );
-
-      const authorityTokenY = getAssociatedTokenAddressSync(
-        target.tokenMintY,
-        authority,
-        false,
-        target.tokenProgramY,
-      );
-      instructions.push(
-        createAssociatedTokenAccountIdempotentInstruction(
-          authority,
-          authorityTokenY,
-          authority,
-          target.tokenMintY,
-          target.tokenProgramY,
-        ),
-      );
-
-      const [poolFeeAccount] = derivePoolFeeAccount(launcherPda, target.lbPair);
-      const poolFeeInfo = await connection.getAccountInfo(poolFeeAccount);
-      if (poolFeeInfo === null) {
+      try {
+        const instructions: TransactionInstruction[] = [];
         instructions.push(
-          buildInitPoolFeeAccountIx({
-            authority,
-            lbPair: target.lbPair,
-            tokenMintY: target.tokenMintY,
-            tokenProgramY: target.tokenProgramY,
+          ComputeBudgetProgram.setComputeUnitLimit({
+            units: this.config.claimComputeUnitLimit,
           }),
         );
+
+        const treasuryTokenY = getAssociatedTokenAddressSync(
+          target.tokenMintY,
+          HATCH_TREASURY,
+          true,
+          target.tokenProgramY,
+        );
+        instructions.push(
+          createAssociatedTokenAccountIdempotentInstruction(
+            authority,
+            treasuryTokenY,
+            HATCH_TREASURY,
+            target.tokenMintY,
+            target.tokenProgramY,
+          ),
+        );
+
+        const authorityTokenY = getAssociatedTokenAddressSync(
+          target.tokenMintY,
+          authority,
+          false,
+          target.tokenProgramY,
+        );
+        instructions.push(
+          createAssociatedTokenAccountIdempotentInstruction(
+            authority,
+            authorityTokenY,
+            authority,
+            target.tokenMintY,
+            target.tokenProgramY,
+          ),
+        );
+
+        const [poolFeeAccount] = derivePoolFeeAccount(launcherPda, target.lbPair);
+        const poolFeeInfo = await connection.getAccountInfo(poolFeeAccount);
+        if (poolFeeInfo === null) {
+          instructions.push(
+            buildInitPoolFeeAccountIx({
+              authority,
+              lbPair: target.lbPair,
+              tokenMintY: target.tokenMintY,
+              tokenProgramY: target.tokenProgramY,
+            }),
+          );
+        }
+
+        const { instruction } = buildClaimFeeManualIx({
+          authority,
+          lbPair: target.lbPair,
+          position: target.position,
+          tokenMintX: target.tokenMintX,
+          tokenMintY: target.tokenMintY,
+          tokenProgramX: target.tokenProgramX,
+          tokenProgramY: target.tokenProgramY,
+          minBinId: target.minBinId,
+          maxBinId: target.maxBinId,
+          referrerFeeAccount,
+        });
+        instructions.push(instruction);
+
+        const lookupTables = await fetchLookupTables(connection, GLOBAL_ALTS);
+        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+
+        const messageV0 = new TransactionMessage({
+          payerKey: authority,
+          recentBlockhash: blockhash,
+          instructions,
+        }).compileToV0Message(lookupTables);
+
+        const transaction = new VersionedTransaction(messageV0);
+
+        if (params.dryRun) {
+          transactions.push(transaction);
+          continue;
+        }
+
+        transaction.sign([signer]);
+        const signature = await connection.sendTransaction(transaction, {
+          skipPreflight: false,
+          maxRetries: 3,
+        });
+        await connection.confirmTransaction(
+          { signature, blockhash, lastValidBlockHeight },
+          "confirmed",
+        );
+        signatures.push(signature);
+      } catch (err) {
+        // Don't let one bad position abort the rest of the claim loop. Wide positions
+        // can produce txs that overflow Solana's 1232-byte size limit; surface the
+        // error to the caller via `failures` and continue.
+        failures.push({
+          position: target.position.toBase58(),
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
-
-      const { instruction } = buildClaimFeeManualIx({
-        authority,
-        lbPair: target.lbPair,
-        position: target.position,
-        tokenMintX: target.tokenMintX,
-        tokenMintY: target.tokenMintY,
-        tokenProgramX: target.tokenProgramX,
-        tokenProgramY: target.tokenProgramY,
-        minBinId: target.minBinId,
-        maxBinId: target.maxBinId,
-        referrerFeeAccount,
-      });
-      instructions.push(instruction);
-
-      const lookupTables = await fetchLookupTables(connection, GLOBAL_ALTS);
-      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
-
-      const messageV0 = new TransactionMessage({
-        payerKey: authority,
-        recentBlockhash: blockhash,
-        instructions,
-      }).compileToV0Message(lookupTables);
-
-      const transaction = new VersionedTransaction(messageV0);
-
-      if (params.dryRun) {
-        transactions.push(transaction);
-        continue;
-      }
-
-      transaction.sign([signer]);
-      const signature = await connection.sendTransaction(transaction, {
-        skipPreflight: false,
-        maxRetries: 3,
-      });
-      await connection.confirmTransaction(
-        { signature, blockhash, lastValidBlockHeight },
-        "confirmed",
-      );
-      signatures.push(signature);
     }
 
     return {
       signatures,
       positionsClaimed: claimTargets.length,
+      failures: failures.length > 0 ? failures : undefined,
       transactions: params.dryRun ? transactions : undefined,
     };
   }
