@@ -150,6 +150,8 @@ Launch a new token with a locked Meteora DLMM position.
 | `feeRate` | `"1.00" \| "2.00" \| "5.00"` | no | `"1.00"` | Bonding curve fee rate for the pool. See [Fee rate options](#fee-rate-options). |
 | `dryRun` | `boolean` | no | `false` | If `true`, builds but does not send the transaction(s). See [Dry run mode](#dry-run-mode). |
 
+SDK launches grind the token mint until the address ends in `EGG`, matching Hatch web launches.
+
 #### Returns `Promise<LaunchResult>`
 
 | Field | Type | Description |
@@ -419,6 +421,7 @@ async function main() {
     name: "My Token",
     symbol: "MYTOK",
     uri: "https://your-permanent-metadata-url.json",
+    // Mint address is auto-ground to end in EGG by default.
   });
 
   console.log("Launched!");
@@ -665,6 +668,7 @@ const { transaction, setupTransaction, mint } = await hatch.launch({
 
 // setupTransaction is present only if LauncherPda / WSOL ATA needs to be created.
 // The launch transaction is already signed by the SDK-generated mint/position keypairs.
+// By default, the generated mint address ends in EGG.
 // You still sign both transactions with your wallet before sending.
 
 if (setupTransaction) {

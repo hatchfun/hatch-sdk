@@ -34,6 +34,7 @@ import {
   launcherPdaExists,
   readLauncherPdaReferrer,
 } from "../pda";
+import { DEFAULT_LAUNCH_MINT_SUFFIX, generateVanityKeypair } from "../utils";
 import { BONDING_CURVE_FEE_PRESETS, DEFAULT_BONDING_CURVE_FEE_RATE } from "./presets";
 import type {
   ClaimFeesParams,
@@ -91,7 +92,10 @@ export class HatchClient {
     const { connection, signer } = this.config;
     const authority = signer.publicKey;
 
-    const tokenMintKeypair = Keypair.generate();
+    const { keypair: tokenMintKeypair } = await generateVanityKeypair({
+      suffix: DEFAULT_LAUNCH_MINT_SUFFIX,
+      caseSensitive: true,
+    });
     const positionKeypair = Keypair.generate();
     const [launcherPda] = deriveLauncherPda(authority);
 
