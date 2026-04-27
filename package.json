@@ -26,6 +26,10 @@
       "types": "./src/meteora/index.ts",
       "default": "./src/meteora/index.ts"
     },
+    "./metadata": {
+      "types": "./src/metadata/index.ts",
+      "default": "./src/metadata/index.ts"
+    },
     "./pda": {
       "types": "./src/pda/index.ts",
       "default": "./src/pda/index.ts"
