@@ -24,15 +24,9 @@ export interface LaunchParams {
   symbol: string;
   /** Publicly-reachable HTTPS URL to a JSON metadata file.
    *
-   *  Expected JSON shape:
-   *  ```json
-   *  {
-   *    "name": "My Token",
-   *    "symbol": "MYTOK",
-   *    "description": "Optional description",
-   *    "image": "https://example.com/logo.png"
-   *  }
-   *  ```
+   *  Expected JSON shape follows `HatchTokenMetadata` from `hatch-sdk/metadata`.
+   *  Use `buildHatchTokenMetadata()` and `validateHatchTokenMetadata()` to match
+   *  Hatch web-launched token metadata and avoid UI/explorer drift.
    */
   uri: string;
   /** Optional referrer wallet pubkey. Immutably recorded on the LauncherPda on first launch. */

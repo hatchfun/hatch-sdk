@@ -347,9 +347,16 @@ Create a file like this:
   "name": "My Token",
   "symbol": "MYTOK",
   "description": "A short description of your token.",
-  "image": "https://example.com/logo.png"
+  "image": "https://example.com/logo.png",
+  "extensions": {
+    "twitter": "https://x.com/mytoken",
+    "website": "https://mytoken.example",
+    "telegram": "https://t.me/mytoken"
+  }
 }
 ```
+
+`extensions` is optional, but this is the canonical place for Hatch social links. Omit the whole object if you do not have socials yet.
 
 Host it at a **permanent, public HTTPS URL**. Options:
 - **GitHub Gist** (public, pinned revision URL) — free, quick
@@ -361,7 +368,8 @@ Before launch, verify:
 
 - the JSON URL opens publicly in a browser
 - the URL returns JSON, not HTML
-- the `image` URL opens directly as an image
+- the `image` URL opens publicly
+- any social URLs under `extensions` open publicly
 - `name` and `symbol` match the values you will pass to `launch()`
 - both URLs are permanent, because the on-chain `uri` is immutable
 
@@ -466,8 +474,13 @@ The `uri` parameter in `launch()` points to a JSON file that wallets (Phantom, S
 {
   "name": "My Token",
   "symbol": "MYTOK",
-  "description": "Optional. Shown in explorers.",
-  "image": "https://permanent-url.com/logo.png"
+  "description": "Shown in explorers, wallets, and Hatch.",
+  "image": "https://permanent-url.com/logo.png",
+  "extensions": {
+    "twitter": "https://x.com/mytoken",
+    "website": "https://mytoken.example",
+    "telegram": "https://t.me/mytoken"
+  }
 }
 ```
 
@@ -475,8 +488,9 @@ The `uri` parameter in `launch()` points to a JSON file that wallets (Phantom, S
 |---|---|---|
 | `name` | yes | Display name in wallets. Should match what you pass to `launch()`. |
 | `symbol` | yes | Ticker. Should match the `symbol` param. |
-| `description` | no | Short description shown in explorers. |
-| `image` | yes | Direct URL to a PNG/JPG/SVG. Displayed as the token icon. Must be publicly accessible forever. |
+| `description` | yes | Short description shown in explorers, wallets, and Hatch. Use an empty string if omitted. |
+| `image` | yes | Public media URL used as the token icon/preview. Must be publicly accessible forever. |
+| `extensions` | no | Social links object. Supported keys: `twitter`, `website`, `telegram`. Values must be public HTTP(S) URLs. |
 
 Important distinction:
 
@@ -500,7 +514,10 @@ Where `https://example.com/metadata/hat.json` contains:
   "name": "hat",
   "symbol": "hat",
   "description": "hat token",
-  "image": "https://example.com/images/hat.png"
+  "image": "https://example.com/images/hat.png",
+  "extensions": {
+    "twitter": "https://x.com/hat"
+  }
 }
 ```
 
@@ -518,10 +535,10 @@ That passes an image URL where Hatch expects a metadata JSON URL.
 
 Suggested agent workflow for metadata:
 
-1. Ask the user for `name`, `symbol`, short description, and image URL.
-2. Create a metadata JSON document using those fields.
+1. Ask the user for `name`, `symbol`, short description, image URL, and optional socials (`twitter`, `website`, `telegram`).
+2. Create a metadata JSON document using those fields, putting socials under `extensions`.
 3. Host the JSON at a permanent public URL.
-4. Verify both the JSON URL and image URL load correctly.
+4. Verify the JSON URL, image URL, and any social URLs load correctly.
 5. Read back the exact `uri` that will be written on-chain before asking for signature.
 
 Suggested metadata template:
@@ -530,8 +547,13 @@ Suggested metadata template:
 {
   "name": "TOKEN_NAME",
   "symbol": "TICKER",
-  "description": "Short description shown in explorers and wallets.",
-  "image": "https://your-public-image-url.png"
+  "description": "Short description shown in explorers, wallets, and Hatch.",
+  "image": "https://your-public-image-url.png",
+  "extensions": {
+    "twitter": "https://x.com/your-handle",
+    "website": "https://your-project.example",
+    "telegram": "https://t.me/your-channel"
+  }
 }
 ```
 
@@ -539,7 +561,8 @@ If an agent is helping a user launch, it should explicitly confirm:
 
 - the metadata JSON URL that will be used as `uri`
 - the image URL inside that JSON
-- that both URLs are public and permanent
+- any social URLs inside `extensions`
+- that all URLs are public and permanent
 
 You can validate a local file or hosted URL with:
 
@@ -555,15 +578,16 @@ If an agent is launching a token from scratch, this is the recommended order:
 
 1. Ask for the target cluster and RPC URL.
 2. Ask for the signer wallet path or signing method.
-3. Ask for `name`, `symbol`, short description, image URL, fee tier, and optional referrer.
-4. Create the metadata JSON from those fields.
+3. Ask for `name`, `symbol`, short description, image URL, optional socials, fee tier, and optional referrer.
+4. Create the metadata JSON from those fields, putting socials under `extensions`.
 5. Host the metadata JSON at a permanent public URL.
-6. Validate the metadata JSON URL and image URL.
+6. Validate the metadata JSON URL, image URL, and any social URLs.
 7. Read back the exact launch inputs:
    - `name`
    - `symbol`
    - metadata JSON `uri`
    - image URL inside the metadata JSON
+   - social URLs inside `extensions`, if any
    - fee tier
    - referrer, if any
    - cluster / RPC target

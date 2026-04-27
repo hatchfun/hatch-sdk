@@ -1,6 +1,11 @@
 {
   "name": "TOKEN_NAME",
   "symbol": "TICKER",
-  "description": "Short description shown in explorers and wallets.",
-  "image": "https://your-public-image-url.png"
+  "description": "Short description shown in explorers, wallets, and Hatch.",
+  "image": "https://your-public-image-url.png",
+  "extensions": {
+    "twitter": "https://x.com/your-handle",
+    "website": "https://your-project.example",
+    "telegram": "https://t.me/your-channel"
+  }
 }
