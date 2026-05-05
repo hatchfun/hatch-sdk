@@ -39,6 +39,7 @@ function buildLauncherAccountWithNoReferrer(): MockAccountInfo {
 function createMockConnection(options: {
   accountInfos?: Record<string, MockAccountInfo | null>;
   blockhashes?: Array<{ blockhash: string; lastValidBlockHeight: number }>;
+  sendTransaction?: (transaction: unknown) => Promise<string>;
 }) {
   const accountInfos = new Map(Object.entries(options.accountInfos ?? {}));
   const blockhashes = [...(options.blockhashes ?? [])];
@@ -61,6 +62,7 @@ function createMockConnection(options: {
       return { value: null };
     },
     async sendTransaction(transaction: unknown) {
+      if (options.sendTransaction) return options.sendTransaction(transaction);
       sentTransactions.push(transaction);
       return `sig-${sentTransactions.length}`;
     },
@@ -73,6 +75,10 @@ function createMockConnection(options: {
 
 function countNonZeroSignatures(signatures: Uint8Array[]): number {
   return signatures.filter((sig) => sig.some((byte) => byte !== 0)).length;
+}
+
+function tokenAmount(amount: number): { toNumber: () => number } {
+  return { toNumber: () => amount };
 }
 
 test("launch dryRun pre-signs SDK-generated mint and position signers", async () => {
@@ -119,7 +125,7 @@ test("launch confirms setup transaction with the original setup blockhash tuple"
   });
 });
 
-test("claimFees dryRun returns transactions for each targeted position", async () => {
+test("claimFees dryRun returns transactions for each non-empty targeted position", async () => {
   const signer = Keypair.generate();
   const [launcherPda] = deriveLauncherPda(signer.publicKey);
   const launcherAccount = buildLauncherAccountWithNoReferrer();
@@ -140,11 +146,15 @@ test("claimFees dryRun returns transactions for each targeted position", async (
             lbPairPositionsData: [
               {
                 publicKey: Keypair.generate().publicKey,
-                positionData: { lowerBinId: -444, upperBinId: -375 },
+                positionData: { lowerBinId: -444, upperBinId: -375, feeY: tokenAmount(1_000) },
               },
               {
                 publicKey: Keypair.generate().publicKey,
-                positionData: { lowerBinId: -444, upperBinId: -375 },
+                positionData: { lowerBinId: -444, upperBinId: -375, feeY: tokenAmount(0) },
+              },
+              {
+                publicKey: Keypair.generate().publicKey,
+                positionData: { lowerBinId: -444, upperBinId: -375, feeY: tokenAmount(2_000) },
               },
             ],
           },
@@ -166,6 +176,56 @@ test("claimFees dryRun returns transactions for each targeted position", async (
     assert.equal(result.signatures.length, 0);
     assert.ok(result.transactions);
     assert.equal(result.transactions!.length, 2);
+  } finally {
+    (DLMM as unknown as { getAllLbPairPositionsByUser: unknown }).getAllLbPairPositionsByUser =
+      originalGetAll;
+  }
+});
+
+test("claimFees throws when every targeted position fails", async () => {
+  const signer = Keypair.generate();
+  const [launcherPda] = deriveLauncherPda(signer.publicKey);
+  const launcherAccount = buildLauncherAccountWithNoReferrer();
+  const tokenMint = Keypair.generate().publicKey;
+  const lbPair = Keypair.generate().publicKey;
+
+  const originalGetAll = (DLMM as unknown as { getAllLbPairPositionsByUser: unknown })
+    .getAllLbPairPositionsByUser;
+
+  (DLMM as unknown as { getAllLbPairPositionsByUser: (...args: unknown[]) => Promise<Map<string, unknown>> })
+    .getAllLbPairPositionsByUser = async () =>
+      new Map([
+        [
+          lbPair.toBase58(),
+          {
+            tokenX: { publicKey: tokenMint },
+            tokenY: { publicKey: WSOL_MINT },
+            lbPairPositionsData: [
+              {
+                publicKey: Keypair.generate().publicKey,
+                positionData: { lowerBinId: -444, upperBinId: -375, feeY: tokenAmount(1_000) },
+              },
+            ],
+          },
+        ],
+      ]);
+
+  try {
+    const connection = createMockConnection({
+      accountInfos: {
+        [launcherPda.toBase58()]: launcherAccount,
+      },
+      blockhashes: [makeBlockhash()],
+      sendTransaction: async () => {
+        throw new Error("RPC unavailable");
+      },
+    });
+
+    const client = new HatchClient({ connection: connection as never, signer });
+    await assert.rejects(
+      () => client.claimFees({ mint: tokenMint }),
+      /Failed to claim fees for all 1 targeted position\(s\).*RPC unavailable/,
+    );
   } finally {
     (DLMM as unknown as { getAllLbPairPositionsByUser: unknown }).getAllLbPairPositionsByUser =
       originalGetAll;

@@ -406,6 +406,11 @@ export class HatchClient {
       }
     }
 
+    if (failures.length > 0 && signatures.length === 0 && transactions.length === 0) {
+      const details = failures.map((failure) => `${failure.position}: ${failure.error}`).join("; ");
+      throw new Error(`Failed to claim fees for all ${claimTargets.length} targeted position(s): ${details}`);
+    }
+
     return {
       signatures,
       positionsClaimed: claimTargets.length,
