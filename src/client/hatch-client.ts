@@ -25,6 +25,7 @@ import {
 import {
   buildCreatePoolAndLockedPositionIx,
   buildCreateTokenAndLaunchAccountIx,
+  buildInitializeLaunchStateIx,
   buildInitializeLauncherPdaIx,
 } from "../launch";
 import {
@@ -163,6 +164,7 @@ export class HatchClient {
         params.uri,
       ),
     );
+    launchIxs.push(buildInitializeLaunchStateIx(authority, tokenMintKeypair.publicKey));
     const poolResult = buildCreatePoolAndLockedPositionIx({
       authority,
       tokenMintX: tokenMintKeypair.publicKey,

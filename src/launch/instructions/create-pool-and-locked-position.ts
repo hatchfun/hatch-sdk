@@ -12,7 +12,12 @@ import {
 } from "../../constants/addresses";
 import { findMeteoraTickArrays } from "../../meteora";
 import { deriveLbPair, deriveMeteoraPoolAccounts } from "../../meteora";
-import { deriveLauncherPda, deriveLaunchTokenAccount, derivePoolFeeAccount } from "../../pda";
+import {
+  deriveLaunchState,
+  deriveLauncherPda,
+  deriveLaunchTokenAccount,
+  derivePoolFeeAccount,
+} from "../../pda";
 
 const DISCRIMINATOR = Buffer.from([140, 164, 125, 74, 166, 59, 206, 48]);
 
@@ -52,6 +57,7 @@ export function buildCreatePoolAndLockedPositionIx(params: CreatePoolAndLockedPo
     tokenMintY,
   );
   const [launchTokenAccount] = deriveLaunchTokenAccount(tokenMintX, launcherPda);
+  const [launchState] = deriveLaunchState(tokenMintX);
   const userTokenY = getAssociatedTokenAddressSync(tokenMintY, launcherPda, true, tokenProgramY);
   const [poolFeeAccount] = derivePoolFeeAccount(launcherPda, lbPair);
   const binArrays = findMeteoraTickArrays(lbPair, PREBONDING_LOWER_BIN_ID, PREBONDING_UPPER_BIN_ID);
@@ -71,6 +77,7 @@ export function buildCreatePoolAndLockedPositionIx(params: CreatePoolAndLockedPo
     { pubkey: tokenMintX, isSigner: false, isWritable: false },
     { pubkey: tokenMintY, isSigner: false, isWritable: false },
     { pubkey: launchTokenAccount, isSigner: false, isWritable: true },
+    { pubkey: launchState, isSigner: false, isWritable: false },
     { pubkey: userTokenY, isSigner: false, isWritable: true },
     { pubkey: poolFeeAccount, isSigner: false, isWritable: true },
     { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },

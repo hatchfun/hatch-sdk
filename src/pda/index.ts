@@ -3,6 +3,7 @@ import {
   HATCH_PROGRAM_ID,
   LAUNCHER_PDA_REFERRER_OFFSET,
   LAUNCHER_PDA_SEED,
+  LAUNCH_STATE_SEED,
   LAUNCH_TOKEN_ACCOUNT_SEED,
   METEORA_DLMM_PROGRAM_ID,
   METEORA_EVENT_AUTHORITY_SEED,
@@ -23,6 +24,13 @@ export function deriveLaunchTokenAccount(
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
     [LAUNCH_TOKEN_ACCOUNT_SEED, tokenMint.toBuffer(), launcherPda.toBuffer()],
+    HATCH_PROGRAM_ID,
+  );
+}
+
+export function deriveLaunchState(tokenMint: PublicKey): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [LAUNCH_STATE_SEED, tokenMint.toBuffer()],
     HATCH_PROGRAM_ID,
   );
 }

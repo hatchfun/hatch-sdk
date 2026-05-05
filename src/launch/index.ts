@@ -1,5 +1,6 @@
 export { buildInitializeLauncherPdaIx } from "./instructions/initialize-launcher-pda";
 export { buildCreateTokenAndLaunchAccountIx } from "./instructions/create-token-and-launch-account";
+export { buildInitializeLaunchStateIx } from "./instructions/initialize-launch-state";
 export {
   buildCreatePoolAndLockedPositionIx,
   type CreatePoolAndLockedPositionParams,
