@@ -65,10 +65,12 @@ export interface ClaimFeesParams {
 }
 
 export interface ClaimFeesResult {
-  /** Transaction signatures (one per claimed position). */
+  /** Transaction signatures (one per successfully claimed position). */
   signatures: string[];
-  /** Number of positions targeted in this call. */
+  /** Number of positions targeted in this call (after empty-fee filtering). */
   positionsClaimed: number;
+  /** Per-position errors that did not abort the claim loop, if any. */
+  failures?: Array<{ position: string; error: string }>;
   /** Built claim transactions when dryRun is true. */
   transactions?: VersionedTransaction[];
 }
