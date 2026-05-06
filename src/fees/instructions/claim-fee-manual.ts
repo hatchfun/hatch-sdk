@@ -10,7 +10,12 @@ import {
 } from "../../constants/addresses";
 import { findMeteoraClaimTickArrays } from "../../meteora";
 import { deriveMeteoraPoolAccounts } from "../../meteora";
-import { deriveLaunchTokenAccount, deriveLauncherPda, derivePoolFeeAccount } from "../../pda";
+import {
+  deriveLaunchState,
+  deriveLaunchTokenAccount,
+  deriveLauncherPda,
+  derivePoolFeeAccount,
+} from "../../pda";
 
 const DISCRIMINATOR = Buffer.from([235, 20, 122, 16, 218, 176, 163, 76]);
 
@@ -54,6 +59,7 @@ export function buildClaimFeeManualIx(params: ClaimFeeManualParams): {
     : deriveLaunchTokenAccount(tokenMintX, launcherPda)[0];
 
   const [poolFeeAccountY] = derivePoolFeeAccount(launcherPda, lbPair);
+  const [launchState] = deriveLaunchState(tokenMintX);
   const treasuryTokenY = getAssociatedTokenAddressSync(
     tokenMintY,
     HATCH_TREASURY,
@@ -108,6 +114,7 @@ export function buildClaimFeeManualIx(params: ClaimFeeManualParams): {
     { pubkey: MEMO_PROGRAM_ID, isSigner: false, isWritable: false },
     { pubkey: eventAuthority, isSigner: false, isWritable: false },
     { pubkey: METEORA_DLMM_PROGRAM_ID, isSigner: false, isWritable: false },
+    { pubkey: launchState, isSigner: false, isWritable: true },
   ];
 
   for (const binArray of binArrays) {

@@ -4,7 +4,7 @@ import DLMM from "@meteora-ag/dlmm";
 import { Keypair, PublicKey, SystemProgram, TransactionMessage } from "@solana/web3.js";
 import { HatchClient } from "../src/client/hatch-client";
 import { HATCH_PROGRAM_ID, WSOL_MINT } from "../src/constants";
-import { deriveLauncherPda } from "../src/pda";
+import { deriveLaunchState, deriveLauncherPda } from "../src/pda";
 
 type MockAccountInfo = {
   data: Buffer;
@@ -99,6 +99,16 @@ test("launch dryRun pre-signs SDK-generated mint and position signers", async ()
   assert.ok(result.setupTransaction, "expected a setup transaction for first launch");
   assert.equal(countNonZeroSignatures(result.transaction!.signatures), 2);
   assert.equal(countNonZeroSignatures(result.setupTransaction!.signatures), 0);
+
+  const launchInstructions = TransactionMessage.decompile(result.transaction!.message).instructions;
+  assert.equal(launchInstructions.length, 4);
+  assert.deepEqual(
+    Array.from(launchInstructions[2].data),
+    [43, 136, 170, 96, 251, 157, 75, 235, 0],
+  );
+  assert.ok(
+    launchInstructions[3].keys.some((key) => key.pubkey.equals(deriveLaunchState(result.mint)[0])),
+  );
 });
 
 test("launch confirms setup transaction with the original setup blockhash tuple", async () => {
@@ -176,6 +186,10 @@ test("claimFees dryRun returns transactions for each non-empty targeted position
     assert.equal(result.signatures.length, 0);
     assert.ok(result.transactions);
     assert.equal(result.transactions!.length, 2);
+    const claimInstructions = TransactionMessage.decompile(result.transactions![0].message)
+      .instructions;
+    const claimIx = claimInstructions[claimInstructions.length - 1];
+    assert.ok(claimIx.keys.some((key) => key.pubkey.equals(deriveLaunchState(tokenMint)[0])));
   } finally {
     (DLMM as unknown as { getAllLbPairPositionsByUser: unknown }).getAllLbPairPositionsByUser =
       originalGetAll;

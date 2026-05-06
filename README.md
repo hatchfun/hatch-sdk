@@ -719,6 +719,7 @@ import {
   // Launch instructions
   buildCreateTokenAndLaunchAccountIx,
   buildCreatePoolAndLockedPositionIx,
+  buildInitializeLaunchStateIx,
   buildInitializeLauncherPdaIx,
 
   // Fee instructions
@@ -730,6 +731,7 @@ import {
   // PDA helpers
   deriveLauncherPda,
   deriveLaunchTokenAccount,
+  deriveLaunchState,
   derivePoolFeeAccount,
   deriveReferrerFeeAccount,
   launcherPdaExists,
@@ -798,24 +800,25 @@ Setup tx (small, ~400 bytes):
   1. InitializeLauncherPda — creates PDA ["launcher", authority]
   2. CreateAssociatedTokenAccount — WSOL ATA for the LauncherPda
 
-Launch tx (~1100 bytes with ALTs):
+Launch tx (uses ALTs to stay under Solana's transaction size limit):
   1. ComputeBudget.setComputeUnitLimit(1.2M)
   2. CreateTokenAndLaunchAccount — mints 1B Token-2022, stores metadata
-  3. CreatePoolAndLockedPosition — creates DLMM pair + locked 70-bin position
+  3. InitializeLaunchState — records the token as a normal Hatch launch
+  4. CreatePoolAndLockedPosition — creates DLMM pair + locked 70-bin position
 ```
 
 **Subsequent launches (1 transaction):**
 
 LauncherPda and WSOL ATA already exist, so the setup tx is skipped.
 
-**Claim tx (~800 bytes with ALTs):**
+**Claim tx (uses ALTs):**
 
 ```
   1. ComputeBudget.setComputeUnitLimit(1.4M)
   2. CreateAssociatedTokenAccount (idempotent) — treasury WSOL ATA
   3. CreateAssociatedTokenAccount (idempotent) — signer WSOL ATA
   4. InitPoolFeeAccount (if not yet initialized)
-  5. ClaimFeeManual — claims fees, burns token side, splits WSOL
+  5. ClaimFeeManual — claims fees, validates launch state, burns token side, splits WSOL
 ```
 
 ### On-chain accounts
@@ -824,6 +827,7 @@ LauncherPda and WSOL ATA already exist, so the setup tx is skipped.
 |---|---|---|
 | LauncherPda | `PDA["launcher", authority]` | Owns all positions for this wallet. Stores referrer. One per wallet, created on first launch. |
 | LaunchTokenAccount | `PDA["launch-token", mint, launcherPda]` | Holds the 30% reserve supply. |
+| LaunchState | `PDA["launch-state", mint]` | Records the immutable normal launch mode for new SDK launches. Older launches without this account remain supported by the on-chain program. |
 | PoolFeeAccount | `PDA["pool_fees", launcherPda, lbPair]` | Accumulates WSOL fees before claim. |
 | ReferrerFeeAccount | `PDA["referrer_fees", referrerLauncherPda]` | Accumulates the referrer's 4% share. |
 

@@ -11,10 +11,13 @@ export const HATCH_TREASURY = new PublicKey("85FXCaLWrmU2LeQgL5gucWvaovWAB9Hauyk
 
 export const LAUNCHER_PDA_SEED = Buffer.from("launcher");
 export const LAUNCH_TOKEN_ACCOUNT_SEED = Buffer.from("launch-token");
+export const LAUNCH_STATE_SEED = Buffer.from("launch-state");
 export const POOL_FEES_SEED = Buffer.from("pool_fees");
 export const METEORA_EVENT_AUTHORITY_SEED = Buffer.from("__event_authority");
 
 export const REFERRER_FEE_SEED = Buffer.from("referrer_fees");
+
+export const LAUNCH_MODE_NORMAL = 0;
 
 /** Byte offset of the `referrer` Pubkey in a LauncherPda account.
  *  Layout: 8 (discriminator) + 32 (authority) + 1 (bump) = 41 */

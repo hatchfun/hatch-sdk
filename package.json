@@ -1,6 +1,6 @@
 {
   "name": "hatch-sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "TypeScript SDK for launching tokens and claiming fees on Hatch (Solana).",
   "license": "MIT",
   "main": "./src/index.ts",
