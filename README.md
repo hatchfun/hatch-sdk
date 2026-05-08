@@ -12,6 +12,7 @@ Designed to be agent-friendly: one client for launches, fee claims, referrals, a
 - [Install](#install)
 - [Versioning](#versioning)
 - [Public Usage Policy](#public-usage-policy)
+- [Upgrading existing integrations for CTO mode](#upgrading-existing-integrations-for-cto-mode)
 - [Setup](#setup)
 - [API reference](#api-reference)
   - [`new HatchClient(config)`](#new-hatchclientconfig)
@@ -54,10 +55,15 @@ Designed to be agent-friendly: one client for launches, fee claims, referrals, a
 ## Install
 
 ```bash
-# from GitHub main (moving target; okay for now, but pin a tag or commit for production)
+# Preferred for agents and production once a release tag exists.
+# Replace v0.2.0 with the latest reviewed release tag.
+pnpm add "github:hatchfun/hatch-sdk#v0.2.0"
+
+# Before a tag exists, pin the exact commit you reviewed.
+pnpm add "github:hatchfun/hatch-sdk#COMMIT_SHA"
+
+# Moving main is only for local testing during active development.
 pnpm add https://github.com/hatchfun/hatch-sdk.git
-# or
-npm install https://github.com/hatchfun/hatch-sdk.git
 ```
 
 > **Note:** The SDK ships TypeScript source (no compiled JS). Your project must handle `.ts` imports — use `tsx`, `ts-node`, or a bundler that supports TypeScript.
@@ -70,6 +76,21 @@ This SDK is not on npm yet. If you plan to share it publicly for agents, prefer 
 - Best: publish tagged GitHub releases and have users install by tag or commit SHA.
 - Better than nothing: tell users to pin a specific commit SHA.
 - Avoid: telling users to clone or install straight from a moving `main` branch.
+
+Pinned install examples:
+
+```bash
+# Preferred once a release tag exists. Replace v0.2.0 with the latest reviewed tag.
+pnpm add "github:hatchfun/hatch-sdk#v0.2.0"
+npm install "github:hatchfun/hatch-sdk#v0.2.0"
+yarn add "hatch-sdk@github:hatchfun/hatch-sdk#v0.2.0"
+
+# Before a tag exists, pin the exact commit you reviewed.
+pnpm add "github:hatchfun/hatch-sdk#COMMIT_SHA"
+npm install "github:hatchfun/hatch-sdk#COMMIT_SHA"
+```
+
+For agent-assisted updates, change only the tag or commit after reviewing the new release notes. Do not switch users from a pinned ref back to `main`.
 
 Why:
 
@@ -85,7 +106,7 @@ If you do not want npm overhead yet, GitHub tags are enough. You do not need a r
 If you are consuming this SDK from outside Hatch, use these rules:
 
 - Preferred install target: a tagged release or pinned commit SHA.
-- Current pre-release install target: `https://github.com/hatchfun/hatch-sdk.git`
+- Current pre-release install target: `github:hatchfun/hatch-sdk#COMMIT_SHA`
 - After the first tag is cut, stop recommending the moving `main` branch.
 - Recommended interface for agents: the high-level `HatchClient`.
 - Advanced interface: the low-level instruction builders are available, but they are easier to misuse and should be treated as expert-only.
@@ -93,6 +114,35 @@ If you are consuming this SDK from outside Hatch, use these rules:
 - Wallet policy: use a dedicated launcher hot wallet with limited SOL balance.
 
 In short: pin versions, prefer the high-level client, and do not treat `main` as a stable release channel.
+
+## Upgrading existing integrations for CTO mode
+
+Existing normal-mode integrations do not need a migration. `hatch.launch()` still defaults to `LAUNCH_MODE_NORMAL`, and existing `claimFees({ mint })` calls continue to work for normal launches.
+
+To launch a CTO token, import `LAUNCH_MODE_CTO` and pass it to `launch()`:
+
+```ts
+import { HatchClient, LAUNCH_MODE_CTO } from "hatch-sdk";
+
+const result = await hatch.launch({
+  name,
+  symbol,
+  uri,
+  launchMode: LAUNCH_MODE_CTO,
+});
+```
+
+For existing agents and apps, the CTO-aware update checklist is:
+
+1. Pin the SDK to a CTO-capable tag or commit.
+2. Keep normal launches unchanged unless the user explicitly asks for CTO mode.
+3. Add a launch-mode choice to user input: `LAUNCH_MODE_NORMAL` or `LAUNCH_MODE_CTO`.
+4. For CTO launches, display all returned transaction signatures: `setupSignature`, `ctoSetupSignature`, and `signature`.
+5. Keep calling `claimFees({ mint })` for launcher fee distribution; the SDK detects CTO launch state automatically.
+6. Surface `claimFees().failures` if present, because a multi-position claim can partially succeed.
+7. Use the CTO staking methods only for CTO mints: `stakeCto`, `unstakeCto`, `claimCtoStakingFees`, and `getCtoStakingStatus`.
+
+For new integrations, start with the high-level `HatchClient`. Only use instruction builders when you need custom transaction composition or bundling.
 
 ## Setup
 
@@ -524,7 +574,7 @@ Before launch, verify:
 
 Helpful files in this repo:
 
-- [examples/metadata-template.json](/Users/lorenzoampil_1/global/hatch-sdk/examples/metadata-template.json)
+- [examples/metadata-template.json](examples/metadata-template.json)
 - `pnpm tsx examples/cto-launch.ts`
 - `pnpm tsx examples/cto-staking.ts`
 - `pnpm tsx examples/validate-metadata.ts <metadata-json-path-or-url>`
@@ -541,7 +591,7 @@ Helpful files in this repo:
 ```bash
 mkdir my-launch && cd my-launch
 pnpm init
-pnpm add github:hatchfun/hatch-sdk
+pnpm add "github:hatchfun/hatch-sdk#COMMIT_SHA_OR_TAG"
 pnpm add -D tsx
 ```
 
@@ -752,6 +802,55 @@ This is the safest and clearest workflow for agent-assisted launches.
 ## CTO mode
 
 CTO mode is Hatch's stake-weighted fee distribution mode. A CTO launch still creates the same Token-2022 mint, launch token account, LaunchState, Meteora DLMM pool, and permanently locked position. The difference is that CTO launches also create staking infrastructure for the launched token.
+
+### Agent-ready CTO launch flow
+
+For an end-to-end CTO launch, agents should collect and confirm the same inputs as a normal launch, plus the explicit launch mode:
+
+- `name`
+- `symbol`
+- metadata JSON `uri`
+- fee tier, if not using the default
+- optional referrer
+- `launchMode: LAUNCH_MODE_CTO`
+
+Then build a dry run first:
+
+```ts
+import { HatchClient, LAUNCH_MODE_CTO } from "hatch-sdk";
+
+const dryRun = await hatch.launch({
+  name,
+  symbol,
+  uri,
+  launchMode: LAUNCH_MODE_CTO,
+  dryRun: true,
+  // Optional:
+  // feeRate: "2.00",
+  // referrer: new PublicKey("REFERRER_WALLET_PUBKEY"),
+});
+```
+
+Before asking for a live signature, show the user the mint address, whether `setupTransaction` is present, whether `ctoSetupTransaction` is present, and the fact that CTO launch execution is split across setup and pool creation transactions.
+
+For live sends, call the same method without `dryRun`:
+
+```ts
+const result = await hatch.launch({
+  name,
+  symbol,
+  uri,
+  launchMode: LAUNCH_MODE_CTO,
+  // Optional:
+  // feeRate: "2.00",
+  // referrer: new PublicKey("REFERRER_WALLET_PUBKEY"),
+});
+
+console.log("Mint:", result.mint.toBase58());
+console.log("Wallet setup tx:", result.setupSignature);
+console.log("CTO setup tx:", result.ctoSetupSignature);
+console.log("Pool tx:", result.signature);
+```
 
 ### CTO fee routing
 
