@@ -1,6 +1,10 @@
 import { Connection, PublicKey } from "@solana/web3.js";
 import {
   HATCH_PROGRAM_ID,
+  CTO_FEE_VAULT_X_SEED,
+  CTO_FEE_VAULT_Y_SEED,
+  CTO_STAKE_POOL_SEED,
+  CTO_STAKE_VAULT_SEED,
   LAUNCHER_PDA_REFERRER_OFFSET,
   LAUNCHER_PDA_SEED,
   LAUNCH_STATE_SEED,
@@ -9,6 +13,7 @@ import {
   METEORA_EVENT_AUTHORITY_SEED,
   POOL_FEES_SEED,
   REFERRER_FEE_SEED,
+  USER_STAKE_SEED,
 } from "../constants/addresses";
 
 export function deriveLauncherPda(authority: PublicKey): [PublicKey, number] {
@@ -28,13 +33,6 @@ export function deriveLaunchTokenAccount(
   );
 }
 
-export function deriveLaunchState(tokenMint: PublicKey): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync(
-    [LAUNCH_STATE_SEED, tokenMint.toBuffer()],
-    HATCH_PROGRAM_ID,
-  );
-}
-
 export function deriveMeteorEventAuthority(): [PublicKey, number] {
   return PublicKey.findProgramAddressSync([METEORA_EVENT_AUTHORITY_SEED], METEORA_DLMM_PROGRAM_ID);
 }
@@ -45,6 +43,48 @@ export function derivePoolFeeAccount(
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
     [POOL_FEES_SEED, launcherPda.toBuffer(), lbPair.toBuffer()],
+    HATCH_PROGRAM_ID,
+  );
+}
+
+export function deriveLaunchState(tokenMint: PublicKey): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [LAUNCH_STATE_SEED, tokenMint.toBuffer()],
+    HATCH_PROGRAM_ID,
+  );
+}
+
+export function deriveCtoStakePool(launchState: PublicKey): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [CTO_STAKE_POOL_SEED, launchState.toBuffer()],
+    HATCH_PROGRAM_ID,
+  );
+}
+
+export function deriveCtoStakeVault(stakePool: PublicKey): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [CTO_STAKE_VAULT_SEED, stakePool.toBuffer()],
+    HATCH_PROGRAM_ID,
+  );
+}
+
+export function deriveCtoFeeVaultY(stakePool: PublicKey): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [CTO_FEE_VAULT_Y_SEED, stakePool.toBuffer()],
+    HATCH_PROGRAM_ID,
+  );
+}
+
+export function deriveCtoFeeVaultX(stakePool: PublicKey): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [CTO_FEE_VAULT_X_SEED, stakePool.toBuffer()],
+    HATCH_PROGRAM_ID,
+  );
+}
+
+export function deriveUserStake(stakePool: PublicKey, user: PublicKey): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [USER_STAKE_SEED, stakePool.toBuffer(), user.toBuffer()],
     HATCH_PROGRAM_ID,
   );
 }

@@ -7,12 +7,16 @@ import {
 } from "@solana/web3.js";
 import {
   HATCH_PROGRAM_ID,
+  LAUNCH_MODE_CTO,
+  LAUNCH_MODE_NORMAL,
   METEORA_DLMM_PROGRAM_ID,
   METEORA_EVENT_AUTHORITY_SEED,
+  type LaunchMode,
 } from "../../constants/addresses";
 import { findMeteoraTickArrays } from "../../meteora";
 import { deriveLbPair, deriveMeteoraPoolAccounts } from "../../meteora";
 import {
+  deriveCtoStakePool,
   deriveLaunchState,
   deriveLauncherPda,
   deriveLaunchTokenAccount,
@@ -29,6 +33,7 @@ export interface CreatePoolAndLockedPositionParams {
   tokenProgramY: PublicKey;
   position: PublicKey;
   presetParameter: PublicKey;
+  launchMode?: LaunchMode;
 }
 
 const PREBONDING_LOWER_BIN_ID = -444;
@@ -47,6 +52,7 @@ export function buildCreatePoolAndLockedPositionIx(params: CreatePoolAndLockedPo
     tokenProgramY,
     position,
     presetParameter,
+    launchMode = LAUNCH_MODE_NORMAL,
   } = params;
 
   const [launcherPda] = deriveLauncherPda(authority);
@@ -58,6 +64,7 @@ export function buildCreatePoolAndLockedPositionIx(params: CreatePoolAndLockedPo
   );
   const [launchTokenAccount] = deriveLaunchTokenAccount(tokenMintX, launcherPda);
   const [launchState] = deriveLaunchState(tokenMintX);
+  const [ctoStakePool] = deriveCtoStakePool(launchState);
   const userTokenY = getAssociatedTokenAddressSync(tokenMintY, launcherPda, true, tokenProgramY);
   const [poolFeeAccount] = derivePoolFeeAccount(launcherPda, lbPair);
   const binArrays = findMeteoraTickArrays(lbPair, PREBONDING_LOWER_BIN_ID, PREBONDING_UPPER_BIN_ID);
@@ -90,6 +97,10 @@ export function buildCreatePoolAndLockedPositionIx(params: CreatePoolAndLockedPo
     { pubkey: eventAuthority, isSigner: false, isWritable: false },
     { pubkey: METEORA_DLMM_PROGRAM_ID, isSigner: false, isWritable: false },
   ];
+
+  if (launchMode === LAUNCH_MODE_CTO) {
+    keys.push({ pubkey: ctoStakePool, isSigner: false, isWritable: false });
+  }
 
   for (const binArray of binArrays) {
     keys.push({ pubkey: binArray, isSigner: false, isWritable: true });

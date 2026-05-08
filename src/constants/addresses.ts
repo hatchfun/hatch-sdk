@@ -11,13 +11,24 @@ export const HATCH_TREASURY = new PublicKey("85FXCaLWrmU2LeQgL5gucWvaovWAB9Hauyk
 
 export const LAUNCHER_PDA_SEED = Buffer.from("launcher");
 export const LAUNCH_TOKEN_ACCOUNT_SEED = Buffer.from("launch-token");
-export const LAUNCH_STATE_SEED = Buffer.from("launch-state");
 export const POOL_FEES_SEED = Buffer.from("pool_fees");
+export const LAUNCH_STATE_SEED = Buffer.from("launch-state");
+export const CTO_STAKE_POOL_SEED = Buffer.from("cto-stake-pool");
+export const CTO_STAKE_VAULT_SEED = Buffer.from("cto-stake-vault");
+export const CTO_FEE_VAULT_X_SEED = Buffer.from("cto-fee-vault-x");
+export const CTO_FEE_VAULT_Y_SEED = Buffer.from("cto-fee-vault-y");
+export const USER_STAKE_SEED = Buffer.from("user-stake");
 export const METEORA_EVENT_AUTHORITY_SEED = Buffer.from("__event_authority");
 
 export const REFERRER_FEE_SEED = Buffer.from("referrer_fees");
 
 export const LAUNCH_MODE_NORMAL = 0;
+export const LAUNCH_MODE_CTO = 1;
+export type LaunchMode = typeof LAUNCH_MODE_NORMAL | typeof LAUNCH_MODE_CTO;
+
+export function isSupportedLaunchMode(mode: number): mode is LaunchMode {
+  return mode === LAUNCH_MODE_NORMAL || mode === LAUNCH_MODE_CTO;
+}
 
 /** Byte offset of the `referrer` Pubkey in a LauncherPda account.
  *  Layout: 8 (discriminator) + 32 (authority) + 1 (bump) = 41 */
