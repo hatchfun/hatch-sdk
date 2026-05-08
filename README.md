@@ -777,7 +777,7 @@ The staking pool uses standard accumulator/debt accounting:
 
 This keeps distributions compute-efficient because fee claims update the global accumulators once, while each staker pays their own accounting cost when they stake, unstake, or claim.
 
-Important timing detail: CTO rewards are allocated when Hatch fees are claimed/distributed, not at the exact swap that generated those fees. Hatch automation is expected to call claim/distribute frequently, but accounting is based on claim time.
+Important timing detail: CTO rewards are allocated when Hatch fees are claimed/distributed, not at the exact swap that generated those fees. More frequent distributions reduce timing lag, but accounting is based on claim time.
 
 ### CTO launch and transaction size
 
@@ -938,7 +938,6 @@ import {
   buildInitializeCtoFeeVaultYIx,
 
   // Fee instructions
-  buildClaimFeeIx,
   buildClaimFeeManualIx,
   buildClaimReferrerFeesIx,
   buildInitPoolFeeAccountIx,

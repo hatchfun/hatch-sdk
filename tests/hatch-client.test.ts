@@ -14,7 +14,6 @@ import {
   deriveLauncherPda,
   deriveUserStake,
 } from "../src/pda";
-import { getInstructionDiscriminator } from "../src/utils";
 
 type MockAccountInfo = {
   data: Buffer;
@@ -59,6 +58,8 @@ function writeLe(data: Buffer, value: bigint, offset: number, byteLength: number
     remaining /= BigInt(256);
   }
 }
+
+const CLAIM_FEE_MANUAL_CTO_DISCRIMINATOR = Buffer.from([76, 236, 28, 124, 194, 205, 29, 52]);
 
 function createMockConnection(options: {
   accountInfos?: Record<string, MockAccountInfo | null>;
@@ -308,7 +309,7 @@ test("claimFees dryRun routes CTO fee claims to staking vaults", async () => {
     assert.ok(
       claimIx.data
         .subarray(0, 8)
-        .equals(getInstructionDiscriminator("claim_fee_manual_cto")),
+        .equals(CLAIM_FEE_MANUAL_CTO_DISCRIMINATOR),
     );
     assert.ok(claimIx.keys.some((key) => key.pubkey.equals(stakePool)));
   } finally {

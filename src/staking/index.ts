@@ -9,7 +9,12 @@ import {
   deriveLaunchState,
   deriveUserStake,
 } from "../pda";
-import { getInstructionDiscriminator } from "../utils/discriminator";
+
+const STAKE_CTO_DISCRIMINATOR = Buffer.from([119, 179, 130, 53, 127, 170, 8, 29]);
+const UNSTAKE_CTO_DISCRIMINATOR = Buffer.from([241, 127, 66, 96, 211, 130, 179, 79]);
+const CLAIM_CTO_STAKING_FEES_DISCRIMINATOR = Buffer.from([
+  205, 214, 205, 126, 115, 139, 28, 95,
+]);
 
 function writeU64Le(target: Buffer, value: bigint, offset: number): void {
   if (value < BigInt(0) || value > BigInt("18446744073709551615")) {
@@ -36,7 +41,7 @@ export function buildStakeCtoIx(params: {
   const [stakeVault] = deriveCtoStakeVault(stakePool);
   const ownerTokenAccount = getAssociatedTokenAddressSync(tokenMint, owner, false, tokenProgram);
   const data = Buffer.alloc(16);
-  getInstructionDiscriminator("stake_cto").copy(data, 0);
+  STAKE_CTO_DISCRIMINATOR.copy(data, 0);
   writeU64Le(data, amount, 8);
 
   return new TransactionInstruction({
@@ -68,7 +73,7 @@ export function buildUnstakeCtoIx(params: {
   const [stakeVault] = deriveCtoStakeVault(stakePool);
   const ownerTokenAccount = getAssociatedTokenAddressSync(tokenMint, owner, false, tokenProgram);
   const data = Buffer.alloc(16);
-  getInstructionDiscriminator("unstake_cto").copy(data, 0);
+  UNSTAKE_CTO_DISCRIMINATOR.copy(data, 0);
   writeU64Le(data, amount, 8);
 
   return new TransactionInstruction({
@@ -114,6 +119,6 @@ export function buildClaimCtoStakingFeesIx(
       { pubkey: tokenProgramX, isSigner: false, isWritable: false },
       { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
     ],
-    data: getInstructionDiscriminator("claim_cto_staking_fees"),
+    data: CLAIM_CTO_STAKING_FEES_DISCRIMINATOR,
   });
 }

@@ -6,9 +6,8 @@ import {
   type LaunchMode,
 } from "../../constants/addresses";
 import { deriveLaunchState, deriveLauncherPda, deriveLaunchTokenAccount } from "../../pda";
-import { getInstructionDiscriminator } from "../../utils/discriminator";
 
-const DISCRIMINATOR = getInstructionDiscriminator("initialize_launch_state");
+const DISCRIMINATOR = Buffer.from([43, 136, 170, 96, 251, 157, 75, 235]);
 
 export function buildInitializeLaunchStateIx(
   authority: PublicKey,

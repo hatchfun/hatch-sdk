@@ -19,10 +19,9 @@ import {
   deriveLauncherPda,
   derivePoolFeeAccount,
 } from "../../pda";
-import { getInstructionDiscriminator } from "../../utils/discriminator";
 
-const DISCRIMINATOR = getInstructionDiscriminator("claim_fee_manual");
-const CTO_DISCRIMINATOR = getInstructionDiscriminator("claim_fee_manual_cto");
+const DISCRIMINATOR = Buffer.from([235, 20, 122, 16, 218, 176, 163, 76]);
+const CTO_DISCRIMINATOR = Buffer.from([76, 236, 28, 124, 194, 205, 29, 52]);
 
 export interface ClaimFeeManualParams {
   authority: PublicKey;

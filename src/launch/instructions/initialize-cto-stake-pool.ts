@@ -9,11 +9,10 @@ import {
   deriveLaunchState,
   deriveLauncherPda,
 } from "../../pda";
-import { getInstructionDiscriminator } from "../../utils/discriminator";
 
-const DISCRIMINATOR = getInstructionDiscriminator("initialize_cto_stake_pool");
-const FEE_VAULT_X_DISCRIMINATOR = getInstructionDiscriminator("initialize_cto_fee_vault_x");
-const FEE_VAULT_Y_DISCRIMINATOR = getInstructionDiscriminator("initialize_cto_fee_vault_y");
+const DISCRIMINATOR = Buffer.from([236, 112, 35, 58, 217, 105, 194, 149]);
+const FEE_VAULT_X_DISCRIMINATOR = Buffer.from([42, 105, 23, 197, 213, 78, 220, 166]);
+const FEE_VAULT_Y_DISCRIMINATOR = Buffer.from([218, 15, 184, 92, 255, 60, 14, 177]);
 
 export function buildInitializeCtoStakePoolIx(params: {
   authority: PublicKey;
