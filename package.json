@@ -34,6 +34,10 @@
       "types": "./src/pda/index.ts",
       "default": "./src/pda/index.ts"
     },
+    "./staking": {
+      "types": "./src/staking/index.ts",
+      "default": "./src/staking/index.ts"
+    },
     "./utils": {
       "types": "./src/utils/index.ts",
       "default": "./src/utils/index.ts"

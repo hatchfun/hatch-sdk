@@ -2,7 +2,7 @@
 
 TypeScript SDK for launching tokens and claiming fees on [Hatch](https://hatchfun.xyz/) — a Solana token launcher built on Meteora DLMM.
 
-Designed to be agent-friendly: one client, five methods.
+Designed to be agent-friendly: one client for launches, fee claims, referrals, and CTO staking.
 
 ---
 
@@ -12,17 +12,23 @@ Designed to be agent-friendly: one client, five methods.
 - [Install](#install)
 - [Versioning](#versioning)
 - [Public Usage Policy](#public-usage-policy)
+- [Upgrading existing integrations for CTO mode](#upgrading-existing-integrations-for-cto-mode)
 - [Setup](#setup)
 - [API reference](#api-reference)
   - [`new HatchClient(config)`](#new-hatchclientconfig)
   - [`hatch.launch(params)`](#hatchlaunchparams)
   - [`hatch.claimFees(params)`](#hatchclaimfeesparams)
+  - [`hatch.stakeCto(params)`](#hatchstakectoparams)
+  - [`hatch.unstakeCto(params)`](#hatchunstakectoparams)
+  - [`hatch.claimCtoStakingFees(params)`](#hatchclaimctostakingfeesparams)
+  - [`hatch.getCtoStakingStatus(params)`](#hatchgetctostakingstatusparams)
   - [`hatch.initReferrerFeeAccount(params?)`](#hatchinitreferrerfeeaccountparams)
   - [`hatch.claimReferrerFees(params?)`](#hatchclaimreferrerfeesparams)
   - [`hatch.getLaunchStatus(params)`](#hatchgetlaunchstatusparams)
 - [Step-by-step: your first launch](#step-by-step-your-first-launch)
 - [Metadata JSON](#metadata-json)
 - [Agent Launch Checklist](#agent-launch-checklist)
+- [CTO mode](#cto-mode)
 - [Referrals](#referrals)
 - [Fee rate options](#fee-rate-options)
 - [Dry run mode](#dry-run-mode)
@@ -49,10 +55,15 @@ Designed to be agent-friendly: one client, five methods.
 ## Install
 
 ```bash
-# from GitHub main (moving target; okay for now, but pin a tag or commit for production)
+# Preferred for agents and production once a release tag exists.
+# Replace v0.2.0 with the latest reviewed release tag.
+pnpm add "github:hatchfun/hatch-sdk#v0.2.0"
+
+# Before a tag exists, pin the exact commit you reviewed.
+pnpm add "github:hatchfun/hatch-sdk#COMMIT_SHA"
+
+# Moving main is only for local testing during active development.
 pnpm add https://github.com/hatchfun/hatch-sdk.git
-# or
-npm install https://github.com/hatchfun/hatch-sdk.git
 ```
 
 > **Note:** The SDK ships TypeScript source (no compiled JS). Your project must handle `.ts` imports — use `tsx`, `ts-node`, or a bundler that supports TypeScript.
@@ -65,6 +76,21 @@ This SDK is not on npm yet. If you plan to share it publicly for agents, prefer 
 - Best: publish tagged GitHub releases and have users install by tag or commit SHA.
 - Better than nothing: tell users to pin a specific commit SHA.
 - Avoid: telling users to clone or install straight from a moving `main` branch.
+
+Pinned install examples:
+
+```bash
+# Preferred once a release tag exists. Replace v0.2.0 with the latest reviewed tag.
+pnpm add "github:hatchfun/hatch-sdk#v0.2.0"
+npm install "github:hatchfun/hatch-sdk#v0.2.0"
+yarn add "hatch-sdk@github:hatchfun/hatch-sdk#v0.2.0"
+
+# Before a tag exists, pin the exact commit you reviewed.
+pnpm add "github:hatchfun/hatch-sdk#COMMIT_SHA"
+npm install "github:hatchfun/hatch-sdk#COMMIT_SHA"
+```
+
+For agent-assisted updates, change only the tag or commit after reviewing the new release notes. Do not switch users from a pinned ref back to `main`.
 
 Why:
 
@@ -80,7 +106,7 @@ If you do not want npm overhead yet, GitHub tags are enough. You do not need a r
 If you are consuming this SDK from outside Hatch, use these rules:
 
 - Preferred install target: a tagged release or pinned commit SHA.
-- Current pre-release install target: `https://github.com/hatchfun/hatch-sdk.git`
+- Current pre-release install target: `github:hatchfun/hatch-sdk#COMMIT_SHA`
 - After the first tag is cut, stop recommending the moving `main` branch.
 - Recommended interface for agents: the high-level `HatchClient`.
 - Advanced interface: the low-level instruction builders are available, but they are easier to misuse and should be treated as expert-only.
@@ -88,6 +114,35 @@ If you are consuming this SDK from outside Hatch, use these rules:
 - Wallet policy: use a dedicated launcher hot wallet with limited SOL balance.
 
 In short: pin versions, prefer the high-level client, and do not treat `main` as a stable release channel.
+
+## Upgrading existing integrations for CTO mode
+
+Existing normal-mode integrations do not need a migration. `hatch.launch()` still defaults to `LAUNCH_MODE_NORMAL`, and existing `claimFees({ mint })` calls continue to work for normal launches.
+
+To launch a CTO token, import `LAUNCH_MODE_CTO` and pass it to `launch()`:
+
+```ts
+import { HatchClient, LAUNCH_MODE_CTO } from "hatch-sdk";
+
+const result = await hatch.launch({
+  name,
+  symbol,
+  uri,
+  launchMode: LAUNCH_MODE_CTO,
+});
+```
+
+For existing agents and apps, the CTO-aware update checklist is:
+
+1. Pin the SDK to a CTO-capable tag or commit.
+2. Keep normal launches unchanged unless the user explicitly asks for CTO mode.
+3. Add a launch-mode choice to user input: `LAUNCH_MODE_NORMAL` or `LAUNCH_MODE_CTO`.
+4. For CTO launches, display all returned transaction signatures: `setupSignature`, `ctoSetupSignature`, and `signature`.
+5. Keep calling `claimFees({ mint })` for launcher fee distribution; the SDK detects CTO launch state automatically.
+6. Surface `claimFees().failures` if present, because a multi-position claim can partially succeed.
+7. Use the CTO staking methods only for CTO mints: `stakeCto`, `unstakeCto`, `claimCtoStakingFees`, and `getCtoStakingStatus`.
+
+For new integrations, start with the high-level `HatchClient`. Only use instruction builders when you need custom transaction composition or bundling.
 
 ## Setup
 
@@ -115,6 +170,7 @@ const hatch = new HatchClient({
   signer,                        // required — Keypair that signs and pays
   launchComputeUnitLimit: 1_200_000,  // optional — CU budget for launch tx (default: 1.2M)
   claimComputeUnitLimit: 1_400_000,   // optional — CU budget for claim tx (default: 1.4M)
+  ctoStakingComputeUnitLimit: 200_000, // optional — CU budget for CTO stake txs
 });
 ```
 
@@ -132,6 +188,7 @@ Creates a new SDK client.
 | `signer` | `Keypair` | yes | — | Signs and pays for all transactions |
 | `launchComputeUnitLimit` | `number` | no | `1,200,000` | Compute unit budget for the launch transaction |
 | `claimComputeUnitLimit` | `number` | no | `1,400,000` | Compute unit budget for claim transactions |
+| `ctoStakingComputeUnitLimit` | `number` | no | `200,000` | Compute unit budget for CTO stake, unstake, and staking-reward claim transactions |
 
 ---
 
@@ -148,6 +205,7 @@ Launch a new token with a locked Meteora DLMM position.
 | `uri` | `string` | yes | — | HTTPS URL pointing to a JSON metadata file. **Immutable on-chain.** See [Metadata JSON](#metadata-json). |
 | `referrer` | `PublicKey` | no | — | Referrer wallet pubkey. Only recorded on first launch (when LauncherPda is created). See [Referrals](#referrals). |
 | `feeRate` | `"1.00" \| "2.00" \| "5.00"` | no | `"1.00"` | Bonding curve fee rate for the pool. See [Fee rate options](#fee-rate-options). |
+| `launchMode` | `LaunchMode` | no | `LAUNCH_MODE_NORMAL` | Use `LAUNCH_MODE_CTO` to initialize CTO stake-weighted fee distribution. |
 | `dryRun` | `boolean` | no | `false` | If `true`, builds but does not send the transaction(s). See [Dry run mode](#dry-run-mode). |
 
 #### Returns `Promise<LaunchResult>`
@@ -156,12 +214,14 @@ Launch a new token with a locked Meteora DLMM position.
 |---|---|---|
 | `signature` | `string` | Main launch transaction signature. Empty string if `dryRun`. |
 | `setupSignature` | `string \| undefined` | Setup transaction signature, present only if this was the first launch from this wallet (LauncherPda and/or WSOL ATA had to be created). |
+| `ctoSetupSignature` | `string \| undefined` | CTO token/staking setup transaction signature, present only for CTO launches. |
 | `mint` | `PublicKey` | The newly-created SPL token mint address. |
 | `launcherPda` | `PublicKey` | The LauncherPda account that owns the locked position. Derived from signer. |
 | `lbPair` | `PublicKey` | The Meteora DLMM pool address. |
 | `position` | `PublicKey` | The locked Meteora position address. |
 | `transaction` | `VersionedTransaction \| undefined` | Launch transaction, already signed by any SDK-generated ephemeral signers when `dryRun: true`. You still sign with your wallet before sending. |
 | `setupTransaction` | `VersionedTransaction \| undefined` | Setup transaction (only when `dryRun: true` and setup is needed). |
+| `ctoSetupTransaction` | `VersionedTransaction \| undefined` | CTO token/staking setup transaction when `dryRun: true` and `launchMode` is CTO. |
 
 #### Example
 
@@ -177,11 +237,39 @@ console.log("Pool:", result.lbPair.toBase58());
 console.log("Tx:", `https://solscan.io/tx/${result.signature}`);
 ```
 
+#### CTO launch example
+
+```ts
+import { LAUNCH_MODE_CTO } from "hatch-sdk/constants";
+
+const result = await hatch.launch({
+  name: "My CTO Token",
+  symbol: "MCTO",
+  uri: "https://example.com/metadata.json",
+  launchMode: LAUNCH_MODE_CTO,
+});
+
+console.log("CTO setup tx:", result.ctoSetupSignature);
+console.log("Pool tx:", result.signature);
+```
+
+CTO launches create the normal Token-2022 mint and locked DLMM position, plus:
+
+- `LaunchState` with immutable mode `LAUNCH_MODE_CTO`
+- `CtoStakePool`
+- CTO stake vault for the launched token
+- CTO fee vault for launched-token rewards
+- CTO fee vault for WSOL rewards
+
+The high-level client sends CTO launch setup and pool creation as separate transactions to stay below Solana's transaction-size limit. If you require atomic launch execution, use `dryRun: true` and submit the returned `ctoSetupTransaction` and `transaction` through your own bundle flow.
+
 ---
 
 ### `hatch.claimFees(params)`
 
-Claim accrued WSOL fees from a launched token's position(s). The SDK automatically resolves all positions for the given mint under the signer's LauncherPda.
+Claim accrued fees from a launched token's position(s). The SDK automatically resolves all positions for the given mint under the signer's LauncherPda.
+
+For normal launches, `claimFees()` sends claimable WSOL to the launcher after the protocol cut and burns token-side fees. For CTO launches, the SDK detects `LaunchState.mode === LAUNCH_MODE_CTO` and uses the CTO claim route: 80% of WSOL fees and 80% of launched-token fees are distributed into the CTO staking vaults, while the 20% launched-token share is burned.
 
 #### Parameters
 
@@ -196,6 +284,7 @@ Claim accrued WSOL fees from a launched token's position(s). The SDK automatical
 |---|---|---|
 | `signatures` | `string[]` | Transaction signatures, one per claimed position. |
 | `positionsClaimed` | `number` | Number of positions targeted in this call. |
+| `failures` | `Array<{ position: string; error: string }> \| undefined` | Per-position failures when at least one target failed without aborting the whole loop. |
 | `transactions` | `VersionedTransaction[] \| undefined` | Built claim transactions when `dryRun: true`, one per targeted position. |
 
 #### Example
@@ -211,6 +300,116 @@ console.log(`Claimed ${result.positionsClaimed} position(s)`);
 for (const sig of result.signatures) {
   console.log(`  https://solscan.io/tx/${sig}`);
 }
+```
+
+---
+
+### `hatch.stakeCto(params)`
+
+Stake CTO launch tokens into the token's CTO stake pool.
+
+#### Parameters
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `mint` | `PublicKey` | yes | — | CTO token mint. |
+| `amount` | `bigint` | yes | — | Raw token amount in mint base units. Hatch launch tokens use 9 decimals. |
+| `tokenProgram` | `PublicKey` | no | `TOKEN_2022_PROGRAM_ID` | Token program for the launched mint. |
+| `dryRun` | `boolean` | no | `false` | If `true`, builds but does not send. |
+
+#### Returns `Promise<CtoStakingActionResult>`
+
+| Field | Type | Description |
+|---|---|---|
+| `signature` | `string` | Transaction signature. Empty string if `dryRun`. |
+| `transaction` | `VersionedTransaction \| undefined` | Built transaction when `dryRun: true`. |
+
+#### Example
+
+```ts
+const oneToken = BigInt(1_000_000_000); // 1 token with 9 decimals
+
+await hatch.stakeCto({
+  mint: new PublicKey("CTO_TOKEN_MINT"),
+  amount: oneToken,
+});
+```
+
+---
+
+### `hatch.unstakeCto(params)`
+
+Unstake CTO launch tokens. Pending rewards are settled into the user stake account before the staked amount changes, so they remain claimable.
+
+#### Parameters
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `mint` | `PublicKey` | yes | — | CTO token mint. |
+| `amount` | `bigint` | yes | — | Raw token amount in mint base units. |
+| `tokenProgram` | `PublicKey` | no | `TOKEN_2022_PROGRAM_ID` | Token program for the launched mint. |
+| `dryRun` | `boolean` | no | `false` | If `true`, builds but does not send. |
+
+---
+
+### `hatch.claimCtoStakingFees(params)`
+
+Claim the signer's CTO staking rewards. A CTO staker may receive both WSOL and the launched token.
+
+#### Parameters
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `mint` | `PublicKey` | yes | — | CTO token mint. |
+| `tokenProgram` | `PublicKey` | no | `TOKEN_2022_PROGRAM_ID` | Token program for the launched mint. |
+| `dryRun` | `boolean` | no | `false` | If `true`, builds but does not send. |
+
+#### Example
+
+```ts
+const result = await hatch.claimCtoStakingFees({
+  mint: new PublicKey("CTO_TOKEN_MINT"),
+});
+
+console.log(`https://solscan.io/tx/${result.signature}`);
+```
+
+---
+
+### `hatch.getCtoStakingStatus(params)`
+
+Read CTO staking state and calculate pending rewards. Pure read — no transactions sent.
+
+#### Parameters
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `mint` | `PublicKey` | yes | — | CTO token mint. |
+| `owner` | `PublicKey` | no | client signer | Staker wallet to inspect. |
+
+#### Returns `Promise<CtoStakingStatus>`
+
+| Field | Type | Description |
+|---|---|---|
+| `isCto` | `boolean` | True when the mint has a LaunchState with CTO mode. |
+| `stakePool` | `PublicKey` | CTO stake pool PDA. |
+| `userStake` | `PublicKey` | User stake PDA for this owner. |
+| `totalStakedRaw` | `bigint` | Total amount staked in raw base units. |
+| `stakedRaw` | `bigint` | Owner's staked amount in raw base units. |
+| `pendingRewardsTokenRaw` | `bigint` | Claimable launched-token reward in raw base units. |
+| `pendingRewardsWsolRaw` | `bigint` | Claimable WSOL reward in lamports. |
+
+#### Example
+
+```ts
+const status = await hatch.getCtoStakingStatus({
+  mint: new PublicKey("CTO_TOKEN_MINT"),
+});
+
+console.log("Is CTO:", status.isCto);
+console.log("Staked raw:", status.stakedRaw.toString());
+console.log("Pending WSOL lamports:", status.pendingRewardsWsolRaw.toString());
+console.log("Pending token raw:", status.pendingRewardsTokenRaw.toString());
 ```
 
 ---
@@ -375,7 +574,9 @@ Before launch, verify:
 
 Helpful files in this repo:
 
-- [examples/metadata-template.json](/Users/lorenzoampil_1/global/hatch-sdk/examples/metadata-template.json)
+- [examples/metadata-template.json](examples/metadata-template.json)
+- `pnpm tsx examples/cto-launch.ts`
+- `pnpm tsx examples/cto-staking.ts`
 - `pnpm tsx examples/validate-metadata.ts <metadata-json-path-or-url>`
 
 > **The URI is stored on-chain and cannot be changed after launch.**
@@ -390,7 +591,7 @@ Helpful files in this repo:
 ```bash
 mkdir my-launch && cd my-launch
 pnpm init
-pnpm add github:hatchfun/hatch-sdk
+pnpm add "github:hatchfun/hatch-sdk#COMMIT_SHA_OR_TAG"
 pnpm add -D tsx
 ```
 
@@ -578,7 +779,7 @@ If an agent is launching a token from scratch, this is the recommended order:
 
 1. Ask for the target cluster and RPC URL.
 2. Ask for the signer wallet path or signing method.
-3. Ask for `name`, `symbol`, short description, image URL, optional socials, fee tier, and optional referrer.
+3. Ask for `name`, `symbol`, short description, image URL, optional socials, fee tier, launch mode, and optional referrer.
 4. Create the metadata JSON from those fields, putting socials under `extensions`.
 5. Host the metadata JSON at a permanent public URL.
 6. Validate the metadata JSON URL, image URL, and any social URLs.
@@ -589,6 +790,7 @@ If an agent is launching a token from scratch, this is the recommended order:
    - image URL inside the metadata JSON
    - social URLs inside `extensions`, if any
    - fee tier
+   - launch mode (`LAUNCH_MODE_NORMAL` or `LAUNCH_MODE_CTO`)
    - referrer, if any
    - cluster / RPC target
 8. Run `dryRun: true` or RPC simulation first.
@@ -596,6 +798,95 @@ If an agent is launching a token from scratch, this is the recommended order:
 10. Only then ask for approval to send the real launch transaction.
 
 This is the safest and clearest workflow for agent-assisted launches.
+
+## CTO mode
+
+CTO mode is Hatch's stake-weighted fee distribution mode. A CTO launch still creates the same Token-2022 mint, launch token account, LaunchState, Meteora DLMM pool, and permanently locked position. The difference is that CTO launches also create staking infrastructure for the launched token.
+
+### Agent-ready CTO launch flow
+
+For an end-to-end CTO launch, agents should collect and confirm the same inputs as a normal launch, plus the explicit launch mode:
+
+- `name`
+- `symbol`
+- metadata JSON `uri`
+- fee tier, if not using the default
+- optional referrer
+- `launchMode: LAUNCH_MODE_CTO`
+
+Then build a dry run first:
+
+```ts
+import { HatchClient, LAUNCH_MODE_CTO } from "hatch-sdk";
+
+const dryRun = await hatch.launch({
+  name,
+  symbol,
+  uri,
+  launchMode: LAUNCH_MODE_CTO,
+  dryRun: true,
+  // Optional:
+  // feeRate: "2.00",
+  // referrer: new PublicKey("REFERRER_WALLET_PUBKEY"),
+});
+```
+
+Before asking for a live signature, show the user the mint address, whether `setupTransaction` is present, whether `ctoSetupTransaction` is present, and the fact that CTO launch execution is split across setup and pool creation transactions.
+
+For live sends, call the same method without `dryRun`:
+
+```ts
+const result = await hatch.launch({
+  name,
+  symbol,
+  uri,
+  launchMode: LAUNCH_MODE_CTO,
+  // Optional:
+  // feeRate: "2.00",
+  // referrer: new PublicKey("REFERRER_WALLET_PUBKEY"),
+});
+
+console.log("Mint:", result.mint.toBase58());
+console.log("Wallet setup tx:", result.setupSignature);
+console.log("CTO setup tx:", result.ctoSetupSignature);
+console.log("Pool tx:", result.signature);
+```
+
+### CTO fee routing
+
+When `claimFees()` is called for a CTO token:
+
+1. Meteora fees are claimed from the Hatch-owned position.
+2. 20% of WSOL fees goes to the Hatch treasury/referrer path, matching normal fee handling.
+3. 80% of WSOL fees goes to the CTO WSOL fee vault for stakers.
+4. 80% of launched-token fees goes to the CTO token fee vault for stakers.
+5. The remaining 20% of launched-token fees is burned.
+
+If nobody has staked yet, the on-chain program uses the CTO mode's no-staker behavior for that distribution. Future stakers do not receive retroactive rewards from fees that were already claimed before they staked.
+
+### CTO staking accounting
+
+The staking pool uses standard accumulator/debt accounting:
+
+- `accFeeXPerShare` tracks launched-token rewards per staked token.
+- `accFeeYPerShare` tracks WSOL rewards per staked token.
+- each user stake account stores `amount`, fee debt, and pending rewards.
+- staking or unstaking first settles the user's currently earned rewards into pending balances, then updates `amount` and fee debt.
+- claiming transfers pending WSOL and launched-token rewards to the staker.
+
+This keeps distributions compute-efficient because fee claims update the global accumulators once, while each staker pays their own accounting cost when they stake, unstake, or claim.
+
+Important timing detail: CTO rewards are allocated when Hatch fees are claimed/distributed, not at the exact swap that generated those fees. More frequent distributions reduce timing lag, but accounting is based on claim time.
+
+### CTO launch and transaction size
+
+CTO launch setup has more accounts than a normal launch. The high-level SDK sends:
+
+1. optional first-wallet setup transaction for LauncherPda/WSOL ATA,
+2. CTO token and staking setup transaction,
+3. pool/locked-position creation transaction.
+
+This split avoids Solana's transaction-size limit. It is not an atomic bundle by default. For atomic execution, call `launch({ launchMode: LAUNCH_MODE_CTO, dryRun: true })` and submit `ctoSetupTransaction` and `transaction` through your own bundle sender.
 
 ## Referrals
 
@@ -656,7 +947,7 @@ All methods accept `dryRun: true`. This builds the transaction(s) but does **not
 
 ```ts
 // Dry run launch
-const { transaction, setupTransaction, mint } = await hatch.launch({
+const { transaction, setupTransaction, ctoSetupTransaction, mint } = await hatch.launch({
   name: "...",
   symbol: "...",
   uri: "...",
@@ -664,12 +955,19 @@ const { transaction, setupTransaction, mint } = await hatch.launch({
 });
 
 // setupTransaction is present only if LauncherPda / WSOL ATA needs to be created.
-// The launch transaction is already signed by the SDK-generated mint/position keypairs.
-// You still sign both transactions with your wallet before sending.
+// ctoSetupTransaction is present only for CTO launches.
+// SDK-generated mint/position keypairs are pre-signed on returned launch txs.
+// You still sign each transaction with your wallet before sending.
 
 if (setupTransaction) {
   setupTransaction.sign([signer]);
   await connection.sendTransaction(setupTransaction);
+  // wait for confirmation...
+}
+
+if (ctoSetupTransaction) {
+  ctoSetupTransaction.sign([signer]);
+  await connection.sendTransaction(ctoSetupTransaction);
   // wait for confirmation...
 }
 
@@ -679,7 +977,7 @@ await connection.sendTransaction(transaction);
 
 ## Cost breakdown
 
-A launch costs **~0.25 SOL** in rent + transaction fees, paid by the signer:
+A normal launch costs **~0.25 SOL** in rent + transaction fees, paid by the signer:
 
 | Item | SOL | Notes |
 |---|---|---|
@@ -693,11 +991,15 @@ A launch costs **~0.25 SOL** in rent + transaction fees, paid by the signer:
 
 **Measured on mainnet:** 0.254 SOL for a fresh-wallet launch.
 
+CTO launches add stake-pool and vault rent. Budget roughly **+0.012 SOL** over the normal launch cost. The exact value can move with Solana rent settings and transaction fees.
+
+Staking also creates a user stake account the first time a wallet stakes into a CTO token. Budget roughly **~0.003 SOL** rent plus transaction fees for a first stake from a wallet.
+
 Rent is recoverable if accounts are closed (but the locked position is permanent by design).
 
 ## Fee economics on claim
 
-When you call `claimFees()`:
+When you call `claimFees()` for a normal launch:
 
 1. **Token-side fees** (the launched token) — burned on-chain. You never receive these.
 2. **WSOL-side fees** — split as follows:
@@ -710,6 +1012,15 @@ When you call `claimFees()`:
 
 The WSOL lands in your signer's associated token account. Use `spl-token unwrap` or any wallet to convert to SOL.
 
+For CTO launches, `claimFees()` becomes a distribution action:
+
+| Asset | 80% share | 20% share |
+|---|---|---|
+| WSOL fees | Sent to CTO WSOL fee vault for stakers | Hatch treasury/referrer path |
+| Launched-token fees | Sent to CTO token fee vault for stakers | Burned |
+
+Stakers claim their share later with `claimCtoStakingFees()`.
+
 ## Advanced: instruction builders
 
 The high-level `HatchClient` is a thin wrapper. For full control over transaction composition, import the primitives directly:
@@ -721,6 +1032,9 @@ import {
   buildCreatePoolAndLockedPositionIx,
   buildInitializeLaunchStateIx,
   buildInitializeLauncherPdaIx,
+  buildInitializeCtoStakePoolIx,
+  buildInitializeCtoFeeVaultXIx,
+  buildInitializeCtoFeeVaultYIx,
 
   // Fee instructions
   buildClaimFeeManualIx,
@@ -728,12 +1042,22 @@ import {
   buildInitPoolFeeAccountIx,
   buildInitReferrerFeeAccountIx,
 
+  // CTO staking instructions
+  buildStakeCtoIx,
+  buildUnstakeCtoIx,
+  buildClaimCtoStakingFeesIx,
+
   // PDA helpers
+  deriveCtoFeeVaultX,
+  deriveCtoFeeVaultY,
+  deriveCtoStakePool,
+  deriveCtoStakeVault,
   deriveLauncherPda,
   deriveLaunchTokenAccount,
   deriveLaunchState,
   derivePoolFeeAccount,
   deriveReferrerFeeAccount,
+  deriveUserStake,
   launcherPdaExists,
   readLauncherPdaReferrer,
 
@@ -747,6 +1071,8 @@ import {
   GLOBAL_ALTS,
   HATCH_PROGRAM_ID,
   HATCH_TREASURY,
+  LAUNCH_MODE_CTO,
+  LAUNCH_MODE_NORMAL,
   WSOL_MINT,
   METEORA_DLMM_PROGRAM_ID,
   TOKEN_2022_PROGRAM_ID,
@@ -758,6 +1084,7 @@ Subpath imports also work:
 ```ts
 import { buildCreateTokenAndLaunchAccountIx } from "hatch-sdk/launch";
 import { buildClaimFeeManualIx } from "hatch-sdk/fees";
+import { buildStakeCtoIx } from "hatch-sdk/staking";
 import { deriveLauncherPda } from "hatch-sdk/pda";
 import { deriveLbPair } from "hatch-sdk/meteora";
 import { HATCH_PROGRAM_ID } from "hatch-sdk/constants";
@@ -772,7 +1099,7 @@ import { HATCH_PROGRAM_ID } from "hatch-sdk/constants";
 | Property | Value |
 |---|---|
 | Token program | Token-2022 (SPL Token Extensions) |
-| Decimals | 6 |
+| Decimals | 9 |
 | Total supply | 1,000,000,000 (1 billion) |
 | Metadata | Token-2022 native `TokenMetadata` extension (not Metaplex) |
 | Mint authority | Disabled after initial mint |
@@ -793,7 +1120,7 @@ import { HATCH_PROGRAM_ID } from "hatch-sdk/constants";
 
 ### Transaction flow
 
-**First launch from a wallet (2 transactions):**
+**Normal first launch from a wallet (2 transactions):**
 
 ```
 Setup tx (small, ~400 bytes):
@@ -803,13 +1130,33 @@ Setup tx (small, ~400 bytes):
 Launch tx (uses ALTs to stay under Solana's transaction size limit):
   1. ComputeBudget.setComputeUnitLimit(1.2M)
   2. CreateTokenAndLaunchAccount — mints 1B Token-2022, stores metadata
-  3. InitializeLaunchState — records the token as a normal Hatch launch
+  3. InitializeLaunchState — records the token as a normal Hatch launch (`LAUNCH_MODE_NORMAL`)
   4. CreatePoolAndLockedPosition — creates DLMM pair + locked 70-bin position
 ```
 
-**Subsequent launches (1 transaction):**
+**Normal subsequent launches (1 transaction):**
 
 LauncherPda and WSOL ATA already exist, so the setup tx is skipped.
+
+**CTO launch (2-3 transactions):**
+
+```
+Optional setup tx, only for first launch from a wallet:
+  1. InitializeLauncherPda
+  2. CreateAssociatedTokenAccount — WSOL ATA for the LauncherPda
+
+CTO token/staking setup tx:
+  1. ComputeBudget.setComputeUnitLimit(1.2M)
+  2. CreateTokenAndLaunchAccount
+  3. InitializeLaunchState — records `LAUNCH_MODE_CTO`
+  4. InitializeCtoStakePool
+  5. InitializeCtoFeeVaultX
+  6. InitializeCtoFeeVaultY
+
+Pool tx:
+  1. ComputeBudget.setComputeUnitLimit(1.2M)
+  2. CreatePoolAndLockedPosition — validates CTO stake pool as remaining account
+```
 
 **Claim tx (uses ALTs):**
 
@@ -827,9 +1174,14 @@ LauncherPda and WSOL ATA already exist, so the setup tx is skipped.
 |---|---|---|
 | LauncherPda | `PDA["launcher", authority]` | Owns all positions for this wallet. Stores referrer. One per wallet, created on first launch. |
 | LaunchTokenAccount | `PDA["launch-token", mint, launcherPda]` | Holds the 30% reserve supply. |
-| LaunchState | `PDA["launch-state", mint]` | Records the immutable normal launch mode for new SDK launches. Older launches without this account remain supported by the on-chain program. |
+| LaunchState | `PDA["launch-state", mint]` | Records immutable launch mode: normal or CTO. Older launches without this account remain supported by the on-chain program as normal mode. |
 | PoolFeeAccount | `PDA["pool_fees", launcherPda, lbPair]` | Accumulates WSOL fees before claim. |
 | ReferrerFeeAccount | `PDA["referrer_fees", referrerLauncherPda]` | Accumulates the referrer's 4% share. |
+| CtoStakePool | `PDA["cto-stake-pool", launchState]` | Tracks total staked and reward accumulators for CTO launches. |
+| CtoStakeVault | `PDA["cto-stake-vault", stakePool]` | Holds staked launched tokens. |
+| CtoFeeVaultX | `PDA["cto-fee-vault-x", stakePool]` | Holds launched-token rewards for CTO stakers. |
+| CtoFeeVaultY | `PDA["cto-fee-vault-y", stakePool]` | Holds WSOL rewards for CTO stakers. |
+| UserStake | `PDA["user-stake", stakePool, user]` | Stores each staker's amount, fee debt, and pending rewards. |
 
 ---
 
@@ -838,6 +1190,9 @@ LauncherPda and WSOL ATA already exist, so the setup tx is skipped.
 | Error | Cause | Fix |
 |---|---|---|
 | `VersionedTransaction too large: 1261 bytes` | Old SDK version bundled all ixs in one tx | Upgrade to latest `main` — the SDK now splits setup and launch into separate txs |
+| CTO launch sends multiple transactions | CTO setup has extra stake-pool/vault accounts | Expected. Use `dryRun: true` and your own bundle sender if you need atomic execution. |
+| `getCtoStakingStatus()` returns `isCto: false` | Mint has no CTO LaunchState | Confirm the mint was launched with `launchMode: LAUNCH_MODE_CTO`. |
+| Staking claim returns 0 | No fees have been distributed since you staked, or rewards were already claimed | Run `getCtoStakingStatus()` and check pending raw fields. |
 | `No claimable positions found for mint ...` | Signer's LauncherPda doesn't own a position for that mint | Check `getLaunchStatus({ mint })` — are you using the right signer? |
 | `Insufficient funds` or simulation failure on `launch()` | Signer wallet balance too low | Fund with ~0.3 SOL |
 | Transaction simulation fails with compute budget error | CU limit too low for this specific pool state | Pass `launchComputeUnitLimit` / `claimComputeUnitLimit` in `HatchClient` config |

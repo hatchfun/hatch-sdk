@@ -2,6 +2,11 @@ export { buildInitializeLauncherPdaIx } from "./instructions/initialize-launcher
 export { buildCreateTokenAndLaunchAccountIx } from "./instructions/create-token-and-launch-account";
 export { buildInitializeLaunchStateIx } from "./instructions/initialize-launch-state";
 export {
+  buildInitializeCtoFeeVaultXIx,
+  buildInitializeCtoFeeVaultYIx,
+  buildInitializeCtoStakePoolIx,
+} from "./instructions/initialize-cto-stake-pool";
+export {
   buildCreatePoolAndLockedPositionIx,
   type CreatePoolAndLockedPositionParams,
 } from "./instructions/create-pool-and-locked-position";

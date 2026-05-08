@@ -11,6 +11,9 @@ import {
 import { findMeteoraClaimTickArrays } from "../../meteora";
 import { deriveMeteoraPoolAccounts } from "../../meteora";
 import {
+  deriveCtoFeeVaultX,
+  deriveCtoFeeVaultY,
+  deriveCtoStakePool,
   deriveLaunchState,
   deriveLaunchTokenAccount,
   deriveLauncherPda,
@@ -18,6 +21,7 @@ import {
 } from "../../pda";
 
 const DISCRIMINATOR = Buffer.from([235, 20, 122, 16, 218, 176, 163, 76]);
+const CTO_DISCRIMINATOR = Buffer.from([76, 236, 28, 124, 194, 205, 29, 52]);
 
 export interface ClaimFeeManualParams {
   authority: PublicKey;
@@ -29,9 +33,10 @@ export interface ClaimFeeManualParams {
   tokenProgramY: PublicKey;
   minBinId: number;
   maxBinId: number;
-  /** Optional: referrer fee account PDA. If provided, appended as the last remaining account
-   *  after bin arrays so the on-chain program can split 16% treasury / 4% referrer. */
+  /** Optional referrer fee account PDA. The on-chain program scans remaining accounts
+   *  for the expected PDA so CTO stake accounts can also be appended. */
   referrerFeeAccount?: PublicKey;
+  includeCtoAccounts?: boolean;
 }
 
 export function buildClaimFeeManualIx(params: ClaimFeeManualParams): {
@@ -60,6 +65,9 @@ export function buildClaimFeeManualIx(params: ClaimFeeManualParams): {
 
   const [poolFeeAccountY] = derivePoolFeeAccount(launcherPda, lbPair);
   const [launchState] = deriveLaunchState(tokenMintX);
+  const [ctoStakePool] = deriveCtoStakePool(launchState);
+  const [ctoFeeVaultX] = deriveCtoFeeVaultX(ctoStakePool);
+  const [ctoFeeVaultY] = deriveCtoFeeVaultY(ctoStakePool);
   const treasuryTokenY = getAssociatedTokenAddressSync(
     tokenMintY,
     HATCH_TREASURY,
@@ -86,7 +94,7 @@ export function buildClaimFeeManualIx(params: ClaimFeeManualParams): {
   ]);
 
   const data = Buffer.concat([
-    DISCRIMINATOR,
+    params.includeCtoAccounts ? CTO_DISCRIMINATOR : DISCRIMINATOR,
     Buffer.alloc(4),
     Buffer.alloc(4),
     Buffer.alloc(4),
@@ -121,10 +129,13 @@ export function buildClaimFeeManualIx(params: ClaimFeeManualParams): {
     keys.push({ pubkey: binArray, isSigner: false, isWritable: true });
   }
 
-  // Referrer fee account must be the LAST remaining account (after bin arrays).
-  // The on-chain program's find_referrer_fee_account() checks the last entry.
   if (params.referrerFeeAccount) {
     keys.push({ pubkey: params.referrerFeeAccount, isSigner: false, isWritable: true });
+  }
+  if (params.includeCtoAccounts) {
+    keys.push({ pubkey: ctoStakePool, isSigner: false, isWritable: true });
+    keys.push({ pubkey: ctoFeeVaultX, isSigner: false, isWritable: true });
+    keys.push({ pubkey: ctoFeeVaultY, isSigner: false, isWritable: true });
   }
 
   return {
